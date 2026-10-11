@@ -1,19 +1,30 @@
 <!doctype html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#04070e"><meta name="description" content="VOID: cinematic interactive solar system explorer">
-<title>VOID — Beyond the Observable</title>
+<html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#04070e"><meta name="description" content="VOID: Türkçe etkileşimli Güneş Sistemi ve bilimsel olasılık simülatörü">
+<title>VOID — Evrenin Ötesinde | Uzay Simülatörü</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"></head>
 <body><div id="app">
-<canvas id="space" aria-label="Interactive 3D solar system"></canvas><div class="vignette"></div>
-<header><a href="#" class="brand"><span class="logo">✳</span> VOID<span class="brand-dot">.</span><small>EXPLORER / 01</small></a>
-<span class="system"><i></i> EXPLORATION SYSTEM ACTIVE <span class="slash">/</span> SOLAR GENESIS</span>
-<div class="top-actions"><span>EXPERIENCE V1.0</span><button id="menu" aria-label="Toggle destinations">☰</button><button id="audio" aria-label="Toggle ambient audio">♫ OFF</button></div></header>
-<aside class="sidebar" id="sidebar"><div class="eyebrow">— NAVIGATION / 01</div><h2>Destinations<span class="accent">.</span></h2><p>Select a celestial body to begin exploration.</p><nav id="planet-list" aria-label="Destinations"></nav><div class="side-foot">01 — 09 <span>THE SOLAR SYSTEM</span></div></aside>
-<section class="hero" aria-live="polite"><div class="eyebrow">— <span id="category">THE RINGED GIANT</span> <span class="accent">/ TARGET LOCKED</span></div><span class="hero-index" id="index">07 — 09</span><h1 id="title">SATURN</h1><p id="subtitle">The jewel of the solar system</p><div class="hero-actions"><button class="primary" id="explore">INITIATE APPROACH <span>↗</span></button><span class="hint">↗ DRAG TO ORBIT</span></div></section>
-<aside class="details"><div class="panel-top">✦ CELESTIAL INTELLIGENCE <span>/ 02</span></div><div class="scan">PLANETARY SCAN <span>● ONLINE</span></div><h2 id="detail-title">SATURN</h2><p id="description"></p><div class="stats"><div>DIAMETER<strong id="diameter"></strong></div><div>MEAN TEMP.<strong id="temp"></strong></div><div>KNOWN MOONS<strong id="moons"></strong></div><div>ORBITAL PERIOD<strong id="period"></strong></div></div><div class="data-link">● DATA LINK ESTABLISHED <span>↗</span></div></aside>
-<div class="coords"><span>VOID / DEEP SPACE NETWORK</span><span id="coordinates">CAM POS / 00.00 00.00 00.00</span></div>
-<footer><div class="footer-left">▥ FLIGHT MODE <b id="mode-label">FREE ORBIT</b><button id="mode">SWITCH ↗</button></div><div class="footer-right"><button id="pause">Ⅱ PAUSE</button><label for="speed">TIME SCALE</label><input id="speed" type="range" min="0" max="5" value="1" step=".1"><span id="speed-label">1.0×</span><button id="quality">GRAPHICS: HIGH</button><button id="reset">↺ OVERVIEW</button></div></footer>
-<div id="loading"><div class="loading-orbit"></div><div class="loading-top">ESTABLISHING CONNECTION / 001</div><div class="loading-symbol">✳</div><h2>VOID<span>.</span></h2><p>BEYOND THE OBSERVABLE</p><div class="progress"><i></i></div></div>
-<div id="toast" role="status" aria-live="polite"></div><div id="error"><h2>3D graphics unavailable</h2><p>Enable WebGL/hardware acceleration and refresh.</p></div></div>
+<canvas id="space" aria-label="Etkileşimli üç boyutlu Güneş Sistemi"></canvas><div class="vignette"></div>
+<header><a href="#" class="brand"><span class="logo">✳</span> VOID<span class="brand-dot">.</span><small>KEŞİF / 01</small></a>
+<span class="system"><i></i> SİSTEM AKTİF <span class="slash">/</span> GÜNEŞ SİSTEMİ</span><div id="view-switch" role="group" aria-label="Çalışma modu"><button id="view-explore" class="active">◈ KEŞİF</button><button id="view-sim">⚡ SİMÜLASYON</button></div>
+<div class="top-actions"><span>DENEYİM V2.0</span><button id="menu" aria-label="Gezegenler menüsünü aç veya kapat">☰</button><button id="audio" aria-label="Ortam sesini aç veya kapat">♫ KAPALI</button></div></header>
+<aside class="sidebar" id="sidebar"><div class="eyebrow">— NAVİGASYON / 01</div><h2>Gezegenler<span class="accent">.</span></h2><p>Keşfetmek istediğin gök cismini seç.</p><nav id="planet-list" aria-label="Gök cisimleri"></nav><div class="side-foot">01 — 09 <span>GÜNEŞ SİSTEMİ</span></div></aside>
+<section class="hero" aria-live="polite"><div class="eyebrow">— <span id="category">HALKALI DEV</span> <span class="accent">/ HEDEF KİLİTLENDİ</span></div><span class="hero-index" id="index">07 — 09</span><h1 id="title">SATÜRN</h1><p id="subtitle">Güneş Sistemi’nin halkalı mücevheri</p><div class="hero-actions"><button class="primary" id="explore">YAKLAŞMAYI BAŞLAT <span>↗</span></button><span class="hint">↗ DÖNDÜRMEK İÇİN SÜRÜKLE</span></div></section>
+<aside class="details"><div class="panel-top">✦ GÖK CİSMİ VERİLERİ <span>/ 02</span></div><div class="scan">GEZEGEN TARAMASI <span>● BAĞLI</span></div><h2 id="detail-title">SATURN</h2><p id="description"></p><div class="stats"><div>ÇAP<strong id="diameter"></strong></div><div>ORT. SICAKLIK<strong id="temp"></strong></div><div>UYDU SAYISI<strong id="moons"></strong></div><div>DOLANIM SÜRESİ<strong id="period"></strong></div></div><div class="data-link">● VERİ BAĞLANTISI KURULDU <span>↗</span></div></aside>
+<section id="lab" hidden aria-label="Olasılık laboratuvarı">
+  <div class="sim-label"><span class="sim-dot"></span> VOID LAB / OLASILIK MOTORU</div>
+  <h2 class="lab-heading">Ya şöyle olsaydı<span class="accent">?</span></h2>
+  <p class="lab-desc">Evrenin kurallarını değiştir. Parametreleri seç, etkileri 3D sahnede izle.</p>
+  <div id="lab-tabs" role="group" aria-label="Simülasyon senaryoları"></div>
+  <div id="lab-controls"></div>
+</section>
+<aside id="outcome" hidden aria-label="Simülasyon sonuçları"></aside>
+<div id="event-banner" hidden aria-live="polite"></div>
+<div id="impact-flash" aria-hidden="true"></div>
+<div id="sim-horizon" aria-hidden="true"></div>
+<div class="coords"><span>VOID / UZAY AĞI</span><span id="coordinates">KAMERA / 00.00 00.00 00.00</span></div>
+<footer><div class="footer-left">▥ UÇUŞ MODU <b id="mode-label">SERBEST KAMERA</b><button id="mode">DEĞİŞTİR ↗</button></div><div class="footer-right"><button id="pause">Ⅱ DURAKLAT</button><label for="speed">ZAMAN HIZI</label><input id="speed" type="range" min="0" max="5" value="1" step=".1"><span id="speed-label">1.0×</span><button id="quality">GRAFİK: YÜKSEK</button><button id="reset">↺ GENEL BAKIŞ</button></div></footer>
+<div id="loading"><div class="loading-orbit"></div><div class="loading-top">BAĞLANTI KURULUYOR / 001</div><div class="loading-symbol">✳</div><h2>VOID<span>.</span></h2><p>GÖZLEMLENEBİLİR EVRENİN ÖTESİNDE</p><div class="progress"><i></i></div></div>
+<div id="toast" role="status" aria-live="polite"></div><div id="error"><h2>3D grafikler başlatılamadı</h2><p>WebGL veya donanım hızlandırmayı açıp sayfayı yenile.</p></div></div>
 <script type="module" src="/src/main.js"></script></body></html>

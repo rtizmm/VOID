@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { bodies } from './data.js';
+import { createSimulator } from './sim.js';
 import './style.css';
 
 const $=selector=>document.querySelector(selector);
@@ -22,7 +23,7 @@ const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,3000);
 const controls=new OrbitControls(camera,canvas);
 controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=2;controls.maxDistance=220;
 controls.maxPolarAngle=Math.PI*.96;
-scene.add(new THREE.AmbientLight(0x92b1dd,.19));
+const ambient=new THREE.AmbientLight(0x92b1dd,.19);scene.add(ambient);
 const light=new THREE.PointLight(0xffdeb0,2700,320,1.2);scene.add(light);
 const sunFill=new THREE.PointLight(0xffa34b,100,90);scene.add(sunFill);
 
@@ -105,7 +106,7 @@ bodies.forEach((body,i)=>{
 const reduceMotion=matchMedia('(prefers-reduced-motion:reduce)').matches;
 function smooth(t){return t*t*(3-2*t)}
 function flyTo(pos,tgt,duration=1.8){
-  mode='orbit';controls.enabled=true;$('#mode-label').textContent='FREE ORBIT';
+  mode='orbit';controls.enabled=true;$('#mode-label').textContent='SERBEST KAMERA';
   transition={start:camera.position.clone(),target:controls.target.clone(),end:pos.clone(),look:tgt.clone(),time:0,duration:reduceMotion?.01:duration};
 }
 function select(id,animate=true){
@@ -125,9 +126,9 @@ function select(id,animate=true){
 }
 $('#explore').onclick=()=>select(selected);
 $('#reset').onclick=()=>flyTo(new THREE.Vector3(97,38,120),new THREE.Vector3(0,0,0),2.2);
-$('#pause').onclick=()=>{paused=!paused;$('#pause').textContent=paused?'▶ RESUME':'Ⅱ PAUSE'};
+$('#pause').onclick=()=>{paused=!paused;$('#pause').textContent=paused?'▶ DEVAM':'Ⅱ DURAKLAT'};
 $('#speed').oninput=e=>{speed=+e.target.value;$('#speed-label').textContent=speed.toFixed(1)+'×'};
-$('#quality').onclick=()=>{quality=quality==='HIGH'?'LOW':'HIGH';renderer.setPixelRatio(Math.min(devicePixelRatio,quality==='HIGH'?1.65:1));starMaterial.opacity=quality==='HIGH'?.83:.45;$('#quality').textContent='GRAPHICS: '+quality};
+$('#quality').onclick=()=>{quality=quality==='HIGH'?'LOW':'HIGH';renderer.setPixelRatio(Math.min(devicePixelRatio,quality==='HIGH'?1.65:1));starMaterial.opacity=quality==='HIGH'?.83:.45;$('#quality').textContent='GRAFİK: '+(quality==='HIGH'?'YÜKSEK':'DÜŞÜK')};
 $('#menu').onclick=()=>$('#sidebar').classList.toggle('open');
 const keys=new Set();let looking=false,yaw=0,pitch=0;
 const notify=msg=>{const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(notify.timer);notify.timer=setTimeout(()=>el.classList.remove('show'),2400)};
@@ -136,11 +137,11 @@ $('#mode').onclick=()=>{
   if(mode==='orbit'){
     mode='cockpit';controls.enabled=false;
     const euler=new THREE.Euler().setFromQuaternion(camera.quaternion,'YXZ');yaw=euler.y;pitch=euler.x;
-    $('#mode-label').textContent='COCKPIT';notify('COCKPIT MODE · WASD / Q E · DRAG TO LOOK');
+    $('#mode-label').textContent='KOKPİT';notify('KOKPİT · WASD / Q E · BAKMAK İÇİN SÜRÜKLE');
   }else{
     mode='orbit';controls.enabled=true;
     camera.getWorldDirection(temp);controls.target.copy(camera.position).addScaledVector(temp,20);
-    $('#mode-label').textContent='FREE ORBIT';notify('ORBIT CAMERA ACTIVE');
+    $('#mode-label').textContent='FREE ORBIT';notify('SERBEST KAMERA AKTİF');
   }
 };
 const raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2();let down=null;
@@ -165,7 +166,7 @@ addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>key
 let audioContext=null,audioNodes=[];
 function stopAudio(){for(const osc of audioNodes)try{osc.stop()}catch{}audioNodes=[];if(audioContext){audioContext.close();audioContext=null}}
 $('#audio').onclick=async()=>{
-  if(audioContext){stopAudio();$('#audio').textContent='♫ OFF';return}
+  if(audioContext){stopAudio();$('#audio').textContent='♫ KAPALI';return}
   try{
     const Ctx=window.AudioContext||window.webkitAudioContext;audioContext=new Ctx();
     const master=audioContext.createGain();master.gain.value=.035;master.connect(audioContext.destination);
@@ -174,8 +175,8 @@ $('#audio').onclick=async()=>{
       osc.type=i%2?'sine':'triangle';osc.frequency.value=hz;gain.gain.value=i===0?.33:.1;
       osc.connect(gain).connect(master);osc.start();audioNodes.push(osc);
     });
-    await audioContext.resume();$('#audio').textContent='♫ ON';notify('AMBIENT SYNTH ENABLED');
-  }catch(e){stopAudio();notify('AUDIO UNAVAILABLE')}
+    await audioContext.resume();$('#audio').textContent='♫ AÇIK';notify('ORTAM SESİ AÇILDI');
+  }catch(e){stopAudio();notify('SES BAŞLATILAMADI')}
 };
 let last=performance.now(),counter=0;
 function frame(now){
@@ -208,11 +209,13 @@ function frame(now){
     if(keys.has('KeyQ'))direction.y-=1;if(keys.has('KeyE'))direction.y+=1;
     if(direction.lengthSq()){direction.normalize().applyQuaternion(camera.quaternion).multiplyScalar(travel);camera.position.add(direction)}
   }
-  if(++counter%15===0)$('#coordinates').textContent='CAM POS / '+[camera.position.x,camera.position.y,camera.position.z].map(v=>v.toFixed(1)).join(' · ');
+  if(++counter%15===0)$('#coordinates').textContent='KAMERA / '+[camera.position.x,camera.position.y,camera.position.z].map(v=>v.toFixed(1)).join(' · ');
+  simulator.update(dt);
   renderer.render(scene,camera);
 }
 function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}
 addEventListener('resize',resize);
 select('saturn',false);
+const simulator=createSimulator({scene,camera,objects,ambient,light,sunFill,flyTo,select,notify});
 requestAnimationFrame(frame);
 setTimeout(()=>$('#loading').classList.add('done'),reduceMotion?100:1800);
