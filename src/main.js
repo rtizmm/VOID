@@ -186,7 +186,7 @@ function frame(now){
     prev.copy(objects.get(selected).mesh.getWorldPosition(new THREE.Vector3()));
     for(const e of objects.values()){
       e.mesh.rotation.y+=e.body.spin*dt*60*speed;
-      if(e.body.orbit)e.pivot.rotation.y+=e.body.orbit*dt*speed*.30;
+      if(e.body.orbit && !(e.body.id==='earth'&&simulator.isSunGone()))e.pivot.rotation.y+=e.body.orbit*dt*speed*.30;
     }
     const next=objects.get(selected).mesh.getWorldPosition(new THREE.Vector3());
     if(mode==='orbit'&&!transition&&selected!=='sun'){
@@ -216,6 +216,6 @@ function frame(now){
 function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}
 addEventListener('resize',resize);
 select('saturn',false);
-const simulator=createSimulator({scene,camera,objects,ambient,light,sunFill,flyTo,select,notify});
+const simulator=createSimulator({scene,camera,controls,objects,ambient,light,sunFill,flyTo,select,notify});
 requestAnimationFrame(frame);
 setTimeout(()=>$('#loading').classList.add('done'),reduceMotion?100:1800);

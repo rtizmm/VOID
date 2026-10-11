@@ -24,7 +24,7 @@ const metric=(name,val)=>'<div class="outcome-metric"><label>'+name+'</label><st
 function slider(name,id,min,max,step,value,suffix,low,high){
   return '<div class="sim-row"><div class="sim-row-head"><label for="'+id+'">'+name+'</label><output id="'+id+'-value">'+trNum(value,1)+suffix+'</output></div><input type="range" id="'+id+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+value+'"><div class="sim-scale"><span>'+low+'</span><span>'+high+'</span></div></div>';
 }
-export function createSimulator({scene,camera,objects,ambient,light,sunFill,flyTo,select,notify}){
+export function createSimulator({scene,camera,controls,objects,ambient,light,sunFill,flyTo,select,notify}){
   let open=false,caseId='sun',timer=0,sunActive=false,sunRunning=false,gravityPct=100,gravityApplied=false;
   let diameter=120,velocity=20,massKind='needle',beta=90,flight=null;
   let frameTime=0,impactFlash=0,flashNow=0;
@@ -206,12 +206,15 @@ export function createSimulator({scene,camera,objects,ambient,light,sunFill,flyT
       setVisual();
       if(frameTime%1<dt)showOutcome();
     }
+    const beforeDrift=activeBody();
     if(caseId==='sun'&&sunActive&&timer>=500){
       // Exaggerated tangential motion: educational illustration, NOT orbital mechanics.
       const drift=Math.min(18,(timer-500)/604800*18);
       earth.mesh.position.z=-drift;
     } else earth.mesh.position.z=0;
     const earthPos=activeBody();
+    const driftShift=earthPos.clone().sub(beforeDrift);
+    if(controls.enabled && driftShift.lengthSq()>0){camera.position.add(driftShift);controls.target.add(driftShift)}
     halo.position.copy(earthPos);halo.rotation.z+=dt*.45;
     halo.material.opacity=caseId==='gravity'&&gravityApplied?Math.min(.58,Math.abs(gravityPct-100)/700*.85):0;
     halo.scale.setScalar(1+(gravityPct<100?(100-gravityPct)/230:-(gravityPct-100)/1400));
