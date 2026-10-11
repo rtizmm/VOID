@@ -3,7 +3,18 @@
 <meta name="theme-color" content="#04070e"><meta name="description" content="VOID: Türkçe etkileşimli Güneş Sistemi ve bilimsel olasılık simülatörü">
 <title>VOID — Evrenin Ötesinde | Uzay Simülatörü</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"></head>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"><!-- Fallback: works on GitHub Pages even if publishing raw repository files. -->
+<link rel="stylesheet" href="./src/style.css">
+<link rel="stylesheet" href="./src/sim.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+  }
+}
+</script>
+</head>
 <body><div id="app">
 <canvas id="space" aria-label="Etkileşimli üç boyutlu Güneş Sistemi"></canvas><div class="vignette"></div>
 <header><a href="#" class="brand"><span class="logo">✳</span> VOID<span class="brand-dot">.</span><small>KEŞİF / 01</small></a>
@@ -27,4 +38,4 @@
 <footer><div class="footer-left">▥ UÇUŞ MODU <b id="mode-label">SERBEST KAMERA</b><button id="mode">DEĞİŞTİR ↗</button></div><div class="footer-right"><button id="pause">Ⅱ DURAKLAT</button><label for="speed">ZAMAN HIZI</label><input id="speed" type="range" min="0" max="5" value="1" step=".1"><span id="speed-label">1.0×</span><button id="quality">GRAFİK: YÜKSEK</button><button id="reset">↺ GENEL BAKIŞ</button></div></footer>
 <div id="loading"><div class="loading-orbit"></div><div class="loading-top">BAĞLANTI KURULUYOR / 001</div><div class="loading-symbol">✳</div><h2>VOID<span>.</span></h2><p>GÖZLEMLENEBİLİR EVRENİN ÖTESİNDE</p><div class="progress"><i></i></div></div>
 <div id="toast" role="status" aria-live="polite"></div><div id="error"><h2>3D grafikler başlatılamadı</h2><p>WebGL veya donanım hızlandırmayı açıp sayfayı yenile.</p></div></div>
-<script type="module" src="/src/main.js"></script></body></html>
+<script type="module" src="./src/main.js"></script></body></html>

@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { bodies } from './data.js';
 import { createSimulator } from './sim.js';
-import './style.css';
 
 const $=selector=>document.querySelector(selector);
 const canvas=$('#space');

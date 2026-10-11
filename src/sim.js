@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import {gravityScenario,asteroidScenario,relativisticScenario,sunScenario} from './physics.js';
-import './sim.css';
 
 const $=(sel)=>document.querySelector(sel);
 const trNum=(value,digits=1)=>new Intl.NumberFormat('tr-TR',{maximumFractionDigits:digits}).format(value);
