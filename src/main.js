@@ -20,7 +20,7 @@ const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x03060d);
 const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,3000);
 const controls=new OrbitControls(camera,canvas);
-controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=2;controls.maxDistance=220;
+controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=2;controls.maxDistance=1000;
 controls.maxPolarAngle=Math.PI*.96;
 const ambient=new THREE.AmbientLight(0x92b1dd,.19);scene.add(ambient);
 const light=new THREE.PointLight(0xffdeb0,2700,320,1.2);scene.add(light);
@@ -52,9 +52,10 @@ function texture(body){
   }
   if(body.id==='earth'){
     ctx.fillStyle='#174c82';ctx.fillRect(0,0,768,384);
-    for(let i=0;i<78;i++){ctx.beginPath();ctx.ellipse(rng()*768,rng()*384,8+rng()*50,3+rng()*18,rng()*3,0,Math.PI*2);ctx.fillStyle=rng()>.35?'#3d8056':'#b3a87b';ctx.globalAlpha=.45+rng()*.35;ctx.fill()}
-    ctx.globalAlpha=1;
-    for(let i=0;i<90;i++){ctx.fillStyle='rgba(255,255,255,.14)';ctx.fillRect(0,rng()*384,768,rng()*2)}
+    const continents=[[[.06,.19],[.15,.12],[.24,.17],[.28,.29],[.22,.36],[.20,.47],[.15,.4],[.11,.32]],[[.23,.46],[.31,.49],[.34,.58],[.31,.72],[.27,.88],[.24,.72]],[[.44,.24],[.51,.18],[.56,.23],[.54,.33],[.47,.35]],[[.46,.36],[.55,.33],[.61,.44],[.56,.63],[.52,.76],[.47,.59],[.44,.44]],[[.56,.2],[.7,.13],[.87,.22],[.88,.32],[.79,.39],[.72,.5],[.66,.41],[.61,.47],[.57,.34]],[[.79,.66],[.87,.61],[.92,.68],[.88,.78],[.80,.76]],[[.31,.08],[.38,.1],[.37,.24],[.32,.23]]];
+    for(const path of continents){ctx.beginPath();path.forEach(([x,y],i)=>i?ctx.lineTo(x*768,y*384):ctx.moveTo(x*768,y*384));ctx.closePath();ctx.fillStyle='#52785c';ctx.fill();}
+    ctx.fillStyle='#c4cabd';ctx.fillRect(0,365,768,19);
+    for(let i=0;i<110;i++){ctx.beginPath();ctx.ellipse(rng()*768,rng()*384,4+rng()*40,1+rng()*5,-.2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.18)';ctx.fill()}
   }
   if(body.id==='mars'){for(let i=0;i<55;i++){ctx.fillStyle='rgba(77,38,26,.18)';ctx.beginPath();ctx.arc(rng()*768,rng()*384,2+rng()*22,0,Math.PI*2);ctx.fill()}}
   const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=4;return tex;
@@ -92,7 +93,14 @@ for(const body of bodies){
     glow.scale.set(25,25,1);mesh.add(glow);
   }
 }
-let selected='saturn',quality='HIGH',paused=false,speed=1,mode='orbit',transition=null;
+const earthEntry=objects.get('earth');
+const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(1.045,48,32),new THREE.ShaderMaterial({
+ uniforms:{intensity:{value:.35}},vertexShader:`varying vec3 n;varying vec3 v;void main(){vec4 p=modelViewMatrix*vec4(position,1.0);n=normalize(normalMatrix*normal);v=normalize(-p.xyz);gl_Position=projectionMatrix*p;}`,
+ fragmentShader:`varying vec3 n;varying vec3 v;uniform float intensity;void main(){float rim=pow(1.0-abs(dot(normalize(n),normalize(v))),3.0);gl_FragColor=vec4(0.22,0.55,1.0,rim*intensity);}`,
+ transparent:true,depthWrite:false,side:THREE.FrontSide,blending:THREE.AdditiveBlending}));earthEntry.mesh.add(atmosphere);earthEntry.mesh.userData.atmosphere=atmosphere;
+const moon=new THREE.Mesh(new THREE.SphereGeometry(.27,24,16),new THREE.MeshStandardMaterial({map:texture({id:'moon',color:0xaaa69b}),roughness:1}));scene.add(moon);
+let moonAngle=0;
+let selected='earth',quality='HIGH',paused=false,speed=1,mode='orbit',transition=null;
 const target=new THREE.Vector3(),temp=new THREE.Vector3(),prev=new THREE.Vector3();
 const saturn=objects.get('saturn').mesh.getWorldPosition(new THREE.Vector3());
 controls.target.copy(saturn);camera.position.copy(saturn).add(new THREE.Vector3(14,8,22));camera.lookAt(saturn);controls.update();
@@ -100,12 +108,12 @@ const nav=$('#planet-list');
 bodies.forEach((body,i)=>{
   const button=document.createElement('button');button.type='button';button.className='planet-item';button.dataset.id=body.id;
   button.innerHTML='<span class="planet-number">'+String(i+1).padStart(2,'0')+'</span><span class="planet-icon" style="color:#'+body.color.toString(16).padStart(6,'0')+'">'+body.icon+'</span><span>'+body.name+'</span><span class="planet-arrow">↗</span>';
-  button.onclick=()=>{select(body.id);$('#sidebar').classList.remove('open')};nav.append(button);
+  button.onclick=()=>{select(body.id);(innerWidth<=760&&setPanel(false))};nav.append(button);
 });
 const reduceMotion=matchMedia('(prefers-reduced-motion:reduce)').matches;
 function smooth(t){return t*t*(3-2*t)}
 function flyTo(pos,tgt,duration=1.8){
-  mode='orbit';controls.enabled=true;$('#mode-label').textContent='SERBEST KAMERA';
+  mode='orbit';controls.enabled=true;$('#mode-label').textContent='YÖRÜNGE';$('#flight-speed-label').hidden=true;$('#touch-flight').hidden=true;
   transition={start:camera.position.clone(),target:controls.target.clone(),end:pos.clone(),look:tgt.clone(),time:0,duration:reduceMotion?.01:duration};
 }
 function select(id,animate=true){
@@ -124,11 +132,14 @@ function select(id,animate=true){
   }
 }
 $('#explore').onclick=()=>select(selected);
-$('#reset').onclick=()=>flyTo(new THREE.Vector3(97,38,120),new THREE.Vector3(0,0,0),2.2);
+$('#reset').onclick=()=>{selected='sun';flyTo(new THREE.Vector3(97,68,120),new THREE.Vector3(0,0,0),1.5);if(innerWidth<=760)setPanel(false)};
 $('#pause').onclick=()=>{paused=!paused;$('#pause').textContent=paused?'▶ DEVAM':'Ⅱ DURAKLAT'};
 $('#speed').oninput=e=>{speed=+e.target.value;$('#speed-label').textContent=speed.toFixed(1)+'×'};
 $('#quality').onclick=()=>{quality=quality==='HIGH'?'LOW':'HIGH';renderer.setPixelRatio(Math.min(devicePixelRatio,quality==='HIGH'?1.65:1));starMaterial.opacity=quality==='HIGH'?.83:.45;$('#quality').textContent='GRAFİK: '+(quality==='HIGH'?'YÜKSEK':'DÜŞÜK')};
-$('#menu').onclick=()=>$('#sidebar').classList.toggle('open');
+function setPanel(open){document.body.classList.toggle('panel-hidden',!open);$('#menu').setAttribute('aria-expanded',String(open))}
+$('#menu').onclick=()=>setPanel(document.body.classList.contains('panel-hidden'));
+setPanel(innerWidth>760);
+$('#home').onclick=()=>select('earth');
 const keys=new Set();let looking=false,yaw=0,pitch=0;
 const notify=msg=>{const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(notify.timer);notify.timer=setTimeout(()=>el.classList.remove('show'),2400)};
 $('#mode').onclick=()=>{
@@ -136,15 +147,15 @@ $('#mode').onclick=()=>{
   if(mode==='orbit'){
     mode='cockpit';controls.enabled=false;
     const euler=new THREE.Euler().setFromQuaternion(camera.quaternion,'YXZ');yaw=euler.y;pitch=euler.x;
-    $('#mode-label').textContent='KOKPİT';notify('KOKPİT · WASD / Q E · BAKMAK İÇİN SÜRÜKLE');
+    $('#mode-label').textContent='SERBEST UÇUŞ';$('#flight-speed-label').hidden=false;$('#touch-flight').hidden=false;$('#control-hint').textContent='WASD · uç / Q E · yüksel-alçal / Shift · hızlan / F · odaklan';setPanel(false);notify('WASD ile uç · sürükleyerek bak · Shift ile hızlan');
   }else{
     mode='orbit';controls.enabled=true;
     camera.getWorldDirection(temp);controls.target.copy(camera.position).addScaledVector(temp,20);
-    $('#mode-label').textContent='FREE ORBIT';notify('SERBEST KAMERA AKTİF');
+    $('#mode-label').textContent='YÖRÜNGE';$('#flight-speed-label').hidden=true;$('#touch-flight').hidden=true;$('#control-hint').textContent='Sürükle · döndür / Tekerlek · yaklaş';notify('Yörünge kamerası');
   }
 };
 const raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2();let down=null;
-canvas.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY};looking=true});
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);down={x:e.clientX,y:e.clientY};looking=true});
 canvas.addEventListener('pointerup',e=>{
   looking=false;if(!down)return;
   const moved=Math.hypot(e.clientX-down.x,e.clientY-down.y);down=null;
@@ -160,8 +171,9 @@ canvas.addEventListener('pointermove',e=>{
   camera.rotation.order='YXZ';camera.rotation.set(pitch,yaw,0,'YXZ');
 });
 controls.addEventListener('start',()=>{transition=null});
-addEventListener('keydown',e=>{if(['INPUT','TEXTAREA'].includes(document.activeElement.tagName))return;keys.add(e.code);if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault()});
+addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;if(e.code==='Space'&&document.activeElement.tagName==='BUTTON')return;if(e.code==='KeyF'){select(selected);return}if(e.code==='Escape'){setPanel(false);return}keys.add(e.code);if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault()});
 addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());
+document.querySelectorAll('[data-key]').forEach(b=>{b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture(e.pointerId);keys.add(b.dataset.key)};b.onpointerup=b.onpointercancel=b.onlostpointercapture=()=>keys.delete(b.dataset.key)});
 let audioContext=null,audioNodes=[];
 function stopAudio(){for(const osc of audioNodes)try{osc.stop()}catch{}audioNodes=[];if(audioContext){audioContext.close();audioContext=null}}
 $('#audio').onclick=async()=>{
@@ -201,7 +213,7 @@ function frame(now){
   }
   if(mode==='orbit'){controls.update()}
   else{
-    const travel=(keys.has('ShiftLeft')||keys.has('ShiftRight')?26:8)*dt;
+    const travel=Number($('#flight-speed').value)*(keys.has('ShiftLeft')||keys.has('ShiftRight')?4:1)*dt;
     const direction=new THREE.Vector3();
     if(keys.has('KeyW'))direction.z-=1;if(keys.has('KeyS'))direction.z+=1;
     if(keys.has('KeyA'))direction.x-=1;if(keys.has('KeyD'))direction.x+=1;
@@ -209,12 +221,15 @@ function frame(now){
     if(direction.lengthSq()){direction.normalize().applyQuaternion(camera.quaternion).multiplyScalar(travel);camera.position.add(direction)}
   }
   if(++counter%15===0)$('#coordinates').textContent='KAMERA / '+[camera.position.x,camera.position.y,camera.position.z].map(v=>v.toFixed(1)).join(' · ');
-  simulator.update(dt);
+  simulator.update(paused?0:dt);
+  if(!paused)moonAngle+=dt*.12*Math.sqrt(simulator.gravity/100);
+  const earthWorld=earthEntry.mesh.getWorldPosition(temp);moon.position.copy(earthWorld).add(new THREE.Vector3(Math.cos(moonAngle)*3,.4,Math.sin(moonAngle)*3));moon.visible=earthEntry.mesh.visible;
+  if(simulator.gravity===0)moon.position.y+=Math.min(8,now/1000%30)*.2;
   renderer.render(scene,camera);
 }
 function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}
 addEventListener('resize',resize);
-select('saturn',false);
-const simulator=createSimulator({scene,camera,controls,objects,ambient,light,sunFill,flyTo,select,notify});
+select('earth',true);
+const simulator=createSimulator({scene,camera,controls,objects,ambient,light,sunFill,flyTo,select,notify,setPanel});
 requestAnimationFrame(frame);
-setTimeout(()=>$('#loading').classList.add('done'),reduceMotion?100:1800);
+setTimeout(()=>$('#loading').classList.add('done'),reduceMotion?50:350);

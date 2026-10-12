@@ -1,41 +1,14 @@
 <!doctype html>
-<html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#04070e"><meta name="description" content="VOID: Türkçe etkileşimli Güneş Sistemi ve bilimsel olasılık simülatörü">
-<title>VOID — Evrenin Ötesinde | Uzay Simülatörü</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"><!-- Fallback: works on GitHub Pages even if publishing raw repository files. -->
-<link rel="stylesheet" href="./src/style.css">
-<link rel="stylesheet" href="./src/sim.css">
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-  }
-}
-</script>
-</head>
-<body><div id="app">
-<canvas id="space" aria-label="Etkileşimli üç boyutlu Güneş Sistemi"></canvas><div class="vignette"></div>
-<header><a href="#" class="brand"><span class="logo">✳</span> VOID<span class="brand-dot">.</span><small>KEŞİF / 01</small></a>
-<span class="system"><i></i> SİSTEM AKTİF <span class="slash">/</span> GÜNEŞ SİSTEMİ</span><div id="view-switch" role="group" aria-label="Çalışma modu"><button id="view-explore" class="active">◈ KEŞİF</button><button id="view-sim">⚡ SİMÜLASYON</button></div>
-<div class="top-actions"><span>DENEYİM V2.0</span><button id="menu" aria-label="Gezegenler menüsünü aç veya kapat">☰</button><button id="audio" aria-label="Ortam sesini aç veya kapat">♫ KAPALI</button></div></header>
-<aside class="sidebar" id="sidebar"><div class="eyebrow">— NAVİGASYON / 01</div><h2>Gezegenler<span class="accent">.</span></h2><p>Keşfetmek istediğin gök cismini seç.</p><nav id="planet-list" aria-label="Gök cisimleri"></nav><div class="side-foot">01 — 09 <span>GÜNEŞ SİSTEMİ</span></div></aside>
-<section class="hero" aria-live="polite"><div class="eyebrow">— <span id="category">HALKALI DEV</span> <span class="accent">/ HEDEF KİLİTLENDİ</span></div><span class="hero-index" id="index">07 — 09</span><h1 id="title">SATÜRN</h1><p id="subtitle">Güneş Sistemi’nin halkalı mücevheri</p><div class="hero-actions"><button class="primary" id="explore">YAKLAŞMAYI BAŞLAT <span>↗</span></button><span class="hint">↗ DÖNDÜRMEK İÇİN SÜRÜKLE</span></div></section>
-<aside class="details"><div class="panel-top">✦ GÖK CİSMİ VERİLERİ <span>/ 02</span></div><div class="scan">GEZEGEN TARAMASI <span>● BAĞLI</span></div><h2 id="detail-title">SATURN</h2><p id="description"></p><div class="stats"><div>ÇAP<strong id="diameter"></strong></div><div>ORT. SICAKLIK<strong id="temp"></strong></div><div>UYDU SAYISI<strong id="moons"></strong></div><div>DOLANIM SÜRESİ<strong id="period"></strong></div></div><div class="data-link">● VERİ BAĞLANTISI KURULDU <span>↗</span></div></aside>
-<section id="lab" hidden aria-label="Olasılık laboratuvarı">
-  <div class="sim-label"><span class="sim-dot"></span> VOID LAB / OLASILIK MOTORU</div>
-  <h2 class="lab-heading">Ya şöyle olsaydı<span class="accent">?</span></h2>
-  <p class="lab-desc">Evrenin kurallarını değiştir. Parametreleri seç, etkileri 3D sahnede izle.</p>
-  <div id="lab-tabs" role="group" aria-label="Simülasyon senaryoları"></div>
-  <div id="lab-controls"></div>
-</section>
-<aside id="outcome" hidden aria-label="Simülasyon sonuçları"></aside>
-<div id="event-banner" hidden aria-live="polite"></div>
-<div id="impact-flash" aria-hidden="true"></div>
-<div id="sim-horizon" aria-hidden="true"></div>
-<div class="coords"><span>VOID / UZAY AĞI</span><span id="coordinates">KAMERA / 00.00 00.00 00.00</span></div>
-<footer><div class="footer-left">▥ UÇUŞ MODU <b id="mode-label">SERBEST KAMERA</b><button id="mode">DEĞİŞTİR ↗</button></div><div class="footer-right"><button id="pause">Ⅱ DURAKLAT</button><label for="speed">ZAMAN HIZI</label><input id="speed" type="range" min="0" max="5" value="1" step=".1"><span id="speed-label">1.0×</span><button id="quality">GRAFİK: YÜKSEK</button><button id="reset">↺ GENEL BAKIŞ</button></div></footer>
-<div id="loading"><div class="loading-orbit"></div><div class="loading-top">BAĞLANTI KURULUYOR / 001</div><div class="loading-symbol">✳</div><h2>VOID<span>.</span></h2><p>GÖZLEMLENEBİLİR EVRENİN ÖTESİNDE</p><div class="progress"><i></i></div></div>
-<div id="toast" role="status" aria-live="polite"></div><div id="error"><h2>3D grafikler başlatılamadı</h2><p>WebGL veya donanım hızlandırmayı açıp sayfayı yenile.</p></div></div>
-<script type="module" src="./src/main.js"></script></body></html>
+<html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#070b10"><meta name="description" content="VOID — Uzayı keşfet, deneylerini kur, sonuçlarını izle."><title>VOID — Kozmik Oyun Alanı</title>
+<link rel="stylesheet" href="./src/style.css"><link rel="stylesheet" href="./src/sim.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}</script></head>
+<body><div id="app"><canvas id="space" aria-label="Üç boyutlu uzay. Sürükle: bak, tekerlek: yaklaş."></canvas>
+<header><a class="brand" href="#">VOID<span> / </span><small>KOZMİK OYUN ALANI</small></a><div id="view-switch"><button id="view-explore" class="active">Keşfet</button><button id="view-sim">Deney kur</button></div><div class="top-actions"><button id="audio" aria-label="Ortam sesi">♫ KAPALI</button><button id="menu" aria-label="Kontrol panelini aç veya kapat" aria-expanded="true">☰ Panel</button></div></header>
+<aside class="sidebar" id="sidebar"><div class="eyebrow">ROTA SEÇ</div><h2>Biraz uzaklaş.</h2><p>Bir gezegene git ya da serbestçe uç.</p><nav id="planet-list" aria-label="Gök cisimleri"></nav><details class="details"><summary><span id="detail-title">Dünya</span> hakkında</summary><p id="description"></p><div class="stats"><div>Çap<strong id="diameter"></strong></div><div>Sıcaklık<strong id="temp"></strong></div><div>Uydular<strong id="moons"></strong></div><div>Yörünge süresi<strong id="period"></strong></div></div></details><button id="reset">↗ Güneş Sistemi’ni gör</button></aside>
+<section class="hero"><div class="eyebrow" id="category"></div><h1 id="title">DÜNYA</h1><p id="subtitle"></p><span id="index" hidden></span><button id="explore">Gezegene odaklan ↗</button></section>
+<section id="lab" hidden aria-label="Deney paneli"><div class="eyebrow">SENARYO LABORATUVARI</div><h2>Ya şöyle olsaydı?</h2><p>Bir olay seç. Değerleri değiştir. Başlat.</p><div id="lab-tabs"></div><div id="lab-controls"></div><details class="population-settings"><summary>Dünya ve nüfus ayarları</summary><label for="population">Başlangıç nüfusu · milyar</label><input id="population" type="number" min="0" max="20" step=".1" value="8.5"><label for="exposure">Yerleşim / maruziyet katsayısı</label><select id="exposure"><option value="0.3">Seyrek yerleşim · ×0,3</option><option value="1" selected>Ortalama · ×1</option><option value="1.7">Yoğun yerleşim · ×1,7</option></select><label for="shelter">Korunaklı nüfus · %</label><input id="shelter" type="range" min="0" max="100" step="5" value="0"><output id="shelter-value">%0</output><p>Ayarlar yeni dünyaya uygulanır.</p><button id="new-world">↺ Bu ayarlarla dünyayı sıfırla</button></details><details class="model-note"><summary>Bu sonuçlar nasıl hesaplanıyor?</summary><p>Enerji fizik formülleriyle hesaplanır. Nüfus, krater boyutu ve hasar efektleri <b>kurgusal oyun modelidir; gerçek ölüm tahmini değildir.</b> Coğrafya, atmosfer, iklim ve insanların konumları çözülmez.</p><p>Yerel kayıp = min(0,12; 0,025 × (Mt / 100.000)^0,72). Küresel kayıp = 0–1 aralığında (log₁₀(E) − 21) / 9. Toplam; maruziyet ve (1 − 0,8 × korunak oranı) ile çarpılır. Sayı 0–nüfus aralığında tutulur. Güneş ve yerçekimi sonuçları ayrıca belirtilen oyun katsayılarını kullanır.</p><a href="https://openstax.org/books/university-physics-volume-3/pages/5-9-relativistic-energy" target="_blank" rel="noopener">Göreli enerji formülü ↗</a><a href="https://nas.nasa.gov/areas/atap.html" target="_blank" rel="noopener">Gerçek etki modelleri: NASA ↗</a></details></section>
+<aside id="outcome" hidden aria-label="Kurgusal deney sonuçları"><div class="result-heading"><span id="result-title">Dünya dengede</span><span class="model-badge">OYUN MODELİ</span></div><div class="population-grid"><div>BAŞLANGIÇ<strong id="initial-count">8.500.000.000</strong></div><div>KALAN<strong id="survivor-count">8.500.000.000</strong></div><div>KAYIP<strong id="lost-count">0</strong></div></div><div class="life-track"><i id="life-bar"></i></div><p id="result-description">Henüz bir deney başlatılmadı.</p><small>İnsan sayıları kurgusaldır; bilimsel tahmin değildir.</small></aside>
+<div id="event-banner" hidden role="status"></div><div class="coords"><span id="coordinates"></span><span id="control-hint">Sürükle · döndür &nbsp; Tekerlek · yaklaş</span></div>
+<footer><div class="footer-left"><button id="mode"><span id="mode-label">YÖRÜNGE</span> ⇄</button><label id="flight-speed-label" hidden>Uçuş hızı <input id="flight-speed" type="range" min="2" max="100" value="20"></label></div><div class="footer-right"><button id="pause">Ⅱ Duraklat</button><label for="speed">Zaman</label><input id="speed" type="range" min="0" max="5" value="1" step=".1"><span id="speed-label">1.0×</span><button id="quality">Grafik: yüksek</button><button id="home">⌂ Dünya</button></div></footer>
+<div id="touch-flight" hidden><button data-key="KeyW" aria-label="İleri">↑</button><button data-key="KeyA" aria-label="Sol">←</button><button data-key="KeyS" aria-label="Geri">↓</button><button data-key="KeyD" aria-label="Sağ">→</button><button data-key="KeyE" aria-label="Yukarı">＋</button><button data-key="KeyQ" aria-label="Aşağı">−</button></div>
+<div id="loading"><span class="loading-symbol">✳</span><h2>VOID</h2><p>Evren hazırlanıyor…</p></div><div id="toast" role="status"></div><div id="error"><h2>3D görüntü başlatılamadı</h2><p>Donanım hızlandırmayı açıp sayfayı yenile.</p></div></div><script type="module" src="./src/main.js"></script></body></html>
