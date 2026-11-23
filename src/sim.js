@@ -35,6 +35,7 @@ const CASES = Object.freeze([
 const CASE_IDS = new Set(CASES.map(([id]) => id));
 
 const PLANET_PROFILES = Object.freeze({
+  sun: Object.freeze({ name: 'Güneş', temp: 5500, atmo: 0, vel: 0, pop: 0 }),
   mercury: Object.freeze({ name: 'Merkür', temp: 167, atmo: 0, vel: 47.4, pop: 0 }),
   venus: Object.freeze({ name: 'Venüs', temp: 464, atmo: 100, vel: 35.0, pop: 0 }),
   earth: Object.freeze({ name: 'Dünya', temp: 15, atmo: 100, vel: 29.8, pop: 8.5e9 }),
@@ -932,7 +933,28 @@ export function createSimulator({
         bhMass = safeBhMass;
         const shatter = safeBhMass >= 35;
         bhTelPhase = 0;
-        effects.spawnBlackHole(safeBhMass, shatter);
+        const swallowedList = [];
+        effects.spawnBlackHole(safeBhMass, shatter, (bodyId, bodyName) => {
+          if (epoch !== runEpoch) return;
+          const label = hasOwnProp(PLANET_PROFILES, bodyId) ? PLANET_PROFILES[bodyId].name : bodyName;
+          swallowedList.push(label);
+          if (bodyId === 'sun') {
+            light.intensity = 0;
+            sunFill.intensity = 0;
+            ambient.intensity = 0.09;
+            playSfx?.('blackhole');
+            title = 'Güneş Yutuldu · Sistem Karanlıkta';
+            description = `Kara delik Güneş'i tamamen yuttu! Tüm sistem karanlığa gömüldü (${swallowedList.length} gök cismi yutuldu).`;
+            banner('KARA DELİK · GÜNEŞ YUTULDU · SİSTEM KARANLIĞA GÖMÜLDÜ');
+            logEvent('GÜNEŞ YUTULDU', 'Kara delik yıldızı söndürdü');
+          } else {
+            if (bodyId === 'earth') survivors = 0;
+            banner(`KARA DELİK · ${label.toUpperCase()} YUTULDU (${swallowedList.length} cisim)`);
+            logEvent(`${label} Yutuldu`, 'Olay ufkuna çekildi');
+          }
+          stats();
+          render();
+        });
         playSfx?.('blackhole');
         const tw = tgt.mesh.getWorldPosition(camera.position.clone().set(0, 0, 0));
         const camDir = camera.position.clone().sub(tw);
@@ -1181,7 +1203,7 @@ export function createSimulator({
     enter,
     leave,
     isOpen: () => open,
-    isSunGone: () => sunAge !== null && sunAge >= 500,
+    isSunGone: () => (sunAge !== null && sunAge >= 500) || effects.isSunSwallowed(),
     isBodyCaptured: id => effects.isBodyCaptured(id),
     isBlackHoleActive: () => effects.isBlackHoleActive,
     update(dt) {
