@@ -809,6 +809,10 @@ function frame(now){
   }
 
   const bhOn=simulator.isBlackHoleActive();
+  if(!bhOn&&asteroidBeltGroup.scale.x!==1){
+    asteroidBeltGroup.position.set(0,0,0);asteroidBeltGroup.scale.setScalar(1);asteroidBeltGroup.visible=true;
+    kuiperBelt.position.set(0,0,0);kuiperBelt.scale.setScalar(1);kuiperBelt.visible=true;
+  }
   if(!paused){
     objects.get(selected).mesh.getWorldPosition(prev);
     for(const e of objects.values()){
@@ -820,9 +824,29 @@ function frame(now){
       earthClouds.rotation.y+=dt*.045*speed;
     }
     // Pure GPU Keplerian rotation of dual concentric asteroid sub-rings (0 CPU matrix rebuilds)
-    innerAsteroidRing.rotation.y+=dt*.0155*speed;
-    outerAsteroidRing.rotation.y+=dt*.0112*speed;
-    kuiperBelt.rotation.y+=dt*.0024*speed;
+    if(bhOn){
+      simulator.getBlackHolePosition(temp);
+      const pullStep=Math.min(1,dt*.55);
+      asteroidBeltGroup.position.lerp(temp,pullStep);
+      kuiperBelt.position.lerp(temp,pullStep*.65);
+      const astS=Math.max(.03,asteroidBeltGroup.scale.x*(1-dt*.24));
+      const kuiS=Math.max(.03,kuiperBelt.scale.x*(1-dt*.18));
+      asteroidBeltGroup.scale.setScalar(astS);
+      kuiperBelt.scale.setScalar(kuiS);
+      asteroidBeltGroup.visible=astS>.04;
+      kuiperBelt.visible=kuiS>.04;
+      innerAsteroidRing.rotation.y+=dt*.22*Math.max(1,speed);
+      outerAsteroidRing.rotation.y+=dt*.16*Math.max(1,speed);
+      kuiperBelt.rotation.y+=dt*.06*Math.max(1,speed);
+    }else{
+      if(asteroidBeltGroup.scale.x!==1){
+        asteroidBeltGroup.position.set(0,0,0);asteroidBeltGroup.scale.setScalar(1);asteroidBeltGroup.visible=true;
+        kuiperBelt.position.set(0,0,0);kuiperBelt.scale.setScalar(1);kuiperBelt.visible=true;
+      }
+      innerAsteroidRing.rotation.y+=dt*.0155*speed;
+      outerAsteroidRing.rotation.y+=dt*.0112*speed;
+      kuiperBelt.rotation.y+=dt*.0024*speed;
+    }
     objects.get(selected).mesh.getWorldPosition(nextPos);
     if(mode==='orbit'&&!transition&&selected!=='sun'&&!bhOn){
       nextPos.sub(prev);controls.target.add(nextPos);camera.position.add(nextPos);
