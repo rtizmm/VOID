@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 
 // Stylised persistent effects. All visual sizes and timing are exaggerated.
 export function createImpactEffects(scene, earth, camera) {
@@ -12,6 +12,19 @@ export function createImpactEffects(scene, earth, camera) {
  const wave=new THREE.Mesh(new THREE.RingGeometry(.92,1,96),new THREE.MeshBasicMaterial({color:0xffb277,side:THREE.DoubleSide,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending}));scene.add(wave);
  const rock=new THREE.Mesh(new THREE.IcosahedronGeometry(1,2),new THREE.MeshStandardMaterial({color:0x91867b,roughness:.95,emissive:0x341108}));scene.add(rock);rock.visible=false;
  const tail=new THREE.Mesh(new THREE.ConeGeometry(.25,3,16,1,true),new THREE.MeshBasicMaterial({color:0xffa35f,transparent:true,opacity:.4,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));scene.add(tail);tail.visible=false;
+ // Black Hole 3D group (event horizon + glowing accretion disk)
+ const bhGroup=new THREE.Group();scene.add(bhGroup);bhGroup.visible=false;
+ const bhCore=new THREE.Mesh(new THREE.SphereGeometry(.85,32,24),new THREE.MeshBasicMaterial({color:0x000000}));
+ const bhDisk=new THREE.Mesh(new THREE.RingGeometry(1.05,2.6,64),new THREE.MeshBasicMaterial({color:0xff9d42,side:THREE.DoubleSide,transparent:true,opacity:.78,blending:THREE.AdditiveBlending,depthWrite:false}));
+ bhDisk.rotation.x=Math.PI*.38;
+ const bhHalo=new THREE.Mesh(new THREE.RingGeometry(.86,1.15,64),new THREE.MeshBasicMaterial({color:0xb57cff,side:THREE.DoubleSide,transparent:true,opacity:.85,blending:THREE.AdditiveBlending,depthWrite:false}));
+ bhGroup.add(bhCore,bhDisk,bhHalo);
+ // Gamma-Ray Burst beam + Planetary Shield dome
+ const grbBeam=new THREE.Mesh(new THREE.CylinderGeometry(.35,1.35,26,32,1,true),new THREE.MeshBasicMaterial({color:0x60f0ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,depthWrite:false}));
+ scene.add(grbBeam);grbBeam.visible=false;
+ const shieldDome=new THREE.Mesh(new THREE.SphereGeometry(1.18,36,24),new THREE.MeshBasicMaterial({color:0x5ce1e6,wireframe:true,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false}));
+ sphere.add(shieldDome);
+ let bhActive=false,bhScale=1,grbTime=0;
  const dirs=Array.from({length:220},(_,i)=>{const y=1-2*(i+.5)/220,a=i*2.39996;return new THREE.Vector3(Math.sqrt(1-y*y)*Math.cos(a),y,Math.sqrt(1-y*y)*Math.sin(a))});
  const dummy=new THREE.Object3D(),center=new THREE.Vector3();
  let flight=null,age=0,result=null,normal=new THREE.Vector3(),localNormal=new THREE.Vector3();
@@ -41,11 +54,45 @@ export function createImpactEffects(scene, earth, camera) {
   },
   reset(){
    flight=null;result=null;totalHeat=0;heat.material.opacity=0;sphere.visible=true;debris.visible=false;rock.visible=false;tail.visible=false;wave.material.opacity=0;
+   bhActive=false;bhGroup.visible=false;grbTime=0;grbBeam.visible=false;shieldDome.material.opacity=0;
    for(const mark of [...scarRoot.children]){mark.traverse(x=>{x.geometry?.dispose();x.material?.dispose()});scarRoot.remove(mark)}
+  },
+  spawnBlackHole(massMultiplier,shatter){
+   sphere.getWorldPosition(center);
+   normal.copy(camera.position).sub(center).normalize();
+   bhActive=true;bhScale=Math.max(.55,Math.min(2.6,.45+massMultiplier*.04));
+   bhGroup.visible=true;bhGroup.scale.setScalar(bhScale);
+   if(shatter){impact({damage:1,fragment:true})}
+   else{totalHeat=Math.min(.75,totalHeat+massMultiplier*.012);heat.material.opacity=totalHeat;debris.visible=true;result={damage:.5,fragment:false};age=0}
+  },
+  fireGRB(shieldPct,heatAdd){
+   sphere.getWorldPosition(center);
+   normal.copy(camera.position).sub(center).normalize();
+   grbTime=3.8;grbBeam.visible=true;
+   shieldDome.material.opacity=shieldPct>0?Math.min(.65,shieldPct/100*.75):0;
+   totalHeat=Math.min(.85,totalHeat+heatAdd);heat.material.opacity=totalHeat;
+  },
+  setShield(pct){
+   shieldDome.material.opacity=pct>0?Math.min(.55,pct/100*.6):0;
   },
   setEnvironmentalHeat(value){heat.material.opacity=Math.max(totalHeat,value)},
   update(dt){
    sphere.getWorldPosition(center);debris.position.copy(center);
+   if(bhActive){
+    const tangent=new THREE.Vector3().crossVectors(normal,new THREE.Vector3(0,1,0)).normalize();
+    bhGroup.position.copy(center).addScaledVector(normal,earth.body.size*1.85).addScaledVector(tangent,1.9);
+    bhDisk.rotation.z+=dt*2.4;
+    bhHalo.lookAt(camera.position);
+   }
+   if(grbTime>0){
+    grbTime=Math.max(0,grbTime-dt);
+    const dir=new THREE.Vector3(1,.35,-.4).normalize();
+    grbBeam.position.copy(center).addScaledVector(dir,11);
+    grbBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir);
+    grbBeam.material.opacity=Math.min(.75,grbTime*.32);
+    shieldDome.rotation.y+=dt*1.5;
+    if(grbTime===0)grbBeam.visible=false;
+   }
    if(flight){
     flight.time+=dt;const t=Math.min(1,flight.time/2.8);
     const tangent=new THREE.Vector3().crossVectors(normal,new THREE.Vector3(0,1,0)).normalize();
@@ -74,3 +121,4 @@ export function createImpactEffects(scene, earth, camera) {
   get busy(){return !!flight},get destroyed(){return !!result?.fragment}
  };
 }
+
