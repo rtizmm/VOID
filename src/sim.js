@@ -5,9 +5,9 @@ const num=n=>Math.round(n).toLocaleString('tr-TR');
 const fmt=n=>n>=1e6?n.toExponential(2).replace('e+',' × 10^'):n.toLocaleString('tr-TR',{maximumFractionDigits:2});
 const cases=[['asteroid','☄','Asteroit'],['relativistic','↯','İğne / dağ'],['moon','☾','Ay çarpması'],['sun','☀','Güneş yok'],['gravity','◎','Yerçekimi'],['giant','✹','Dev Güneş'],['blackhole','🕳','Kara Delik'],['grb','⚡','Gama & Kalkan']];
 const range=(label,id,min,max,step,value,unit)=>`<div class="sim-row"><div class="sim-row-head"><label for="${id}">${label}</label><output id="${id}-value">${fmt(value)} ${unit}</output></div><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></div>`;
-export function createSimulator({scene,camera,controls,objects,ambient,light,sunFill,select,notify,setPanel}){
+export function createSimulator({scene,camera,controls,objects,moon,ambient,light,sunFill,flyTo,select,notify,setPanel,addShake,pulseBloom}){
  const earth=objects.get('earth'),sun=objects.get('sun');
- const effects=createImpactEffects(scene,earth,camera);
+ const effects=createImpactEffects(scene,earth,camera,{objects,moon,addShake,pulseBloom});
  const original={ambient:ambient.intensity,light:light.intensity,fill:sunFill.intensity};
  let open=false,caseId='asteroid',diameter=500,velocity=20,beta=99,massKind='needle',gravity=100,solarSize=1,bhMass=8,grbDist=1500,shieldPct=40;
  let initial=8.5e9,survivors=initial,exposure=1,shelter=0,sunAge=null,sunRunning=false,environment=null,appliedSunFraction=0;
@@ -90,13 +90,21 @@ export function createSimulator({scene,camera,controls,objects,ambient,light,sun
   if(caseId==='giant'){
    restoreEnvironment();environment={kind:'giant',value:solarSize,age:0};sun.mesh.scale.setScalar(sun.body.size*solarSize);
    light.intensity=original.light*Math.min(4,solarSize);effects.setEnvironmentalHeat(Math.min(.8,(solarSize-1)*.045));
+   if(addShake)addShake(.12+solarSize*.012,.9);if(pulseBloom)pulseBloom(1.2+solarSize*.04);
    title='Güneş '+solarSize+' kat büyüdü';description='Görsel deney. Nüfus kaybı seçilen boyuta bağlı oyun katsayısıdır.';applyFraction(Math.min(1,(solarSize-1)*.045));banner(title);logEvent('Dev Güneş '+solarSize+'×',title);render();return;
   }
   if(caseId==='blackhole'){
    const shatter=bhMass>=35;
    effects.spawnBlackHole(bhMass,shatter);
-   if(shatter){survivors=0;title='Olay Ufkunda Parçalanma';description=bhMass+' M⊕ kütleli kara delik gelgit kuvvetleriyle Dünya’yı parçaladı.';}
-   else{applyFraction(Math.min(.92,bhMass*.026));title='Kara Delik Gelgit Etkisi';description=bhMass+' M⊕ kara delik yakın geçişi · yığılma diski ışınımı ve gelgit deformasyonu.';}
+   const ew=earth.mesh.getWorldPosition(camera.position.clone().set(0,0,0));
+   const camDir=camera.position.clone().sub(ew).normalize();
+   const up=camera.position.clone().set(0,1,0);
+   const right=up.clone().cross(camDir).normalize();
+   const focusPt=ew.clone().addScaledVector(right,3.1);
+   const widePos=focusPt.clone().addScaledVector(camDir,19.5).addScaledVector(up,7.8);
+   if(flyTo)flyTo(widePos,focusPt,1.35);
+   if(shatter){survivors=0;title='Olay Ufkunda Parçalanma';description=bhMass+' M⊕ kütleli kara delik gelgit kuvvetleriyle Dünya’yı esnetip yutuyor.';}
+   else{applyFraction(Math.min(.92,bhMass*.026));title='Kara Delik Gelgit Etkisi';description=bhMass+' M⊕ kara delik uzay-zamanı büküyor · yakın cisimler spiral çizerek çekiliyor.';}
    banner('KARA DELİK · '+bhMass+' M⊕ · '+title);stats();logEvent('Kara Delik ('+bhMass+' M⊕)',title);render();return;
   }
   if(caseId==='grb'){
@@ -120,7 +128,7 @@ export function createSimulator({scene,camera,controls,objects,ambient,light,sun
  function enter(){open=true;document.body.classList.add('sim-mode');$('#lab').hidden=false;$('#outcome').hidden=false;$('#view-sim').classList.add('active');$('#view-explore').classList.remove('active');setPanel(true);select('earth');render();stats()}
  function leave(){open=false;document.body.classList.remove('sim-mode');$('#lab').hidden=true;$('#view-sim').classList.remove('active');$('#view-explore').classList.add('active');setPanel(innerWidth>760)}
  $('#view-sim').onclick=enter;$('#view-explore').onclick=leave;
- return {enter,leave,isOpen:()=>open,isSunGone:()=>sunAge!==null&&sunAge>=500,
+ return {enter,leave,isOpen:()=>open,isSunGone:()=>sunAge!==null&&sunAge>=500,isBodyCaptured:id=>effects.isBodyCaptured(id),isBlackHoleActive:()=>effects.isBlackHoleActive,
   update(dt){
    effects.update(dt);tick+=dt;
    if(sunRunning){sunAge=Math.min(2592000,sunAge+dt*3600);if(sunAge>=2592000){sunRunning=false;render()}if(tick>.15){solar();tick=0}}
