@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { bodies } from './data.js';
 import { createSimulator } from './sim.js';
@@ -7,7 +7,7 @@ const $=selector=>document.querySelector(selector);
 const canvas=$('#space');
 let renderer;
 try {
-  renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+  renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',preserveDrawingBuffer:true});
 } catch(error) {
   $('#error').classList.add('show'); $('#loading').classList.add('done'); throw error;
 }
@@ -140,6 +140,14 @@ function setPanel(open){document.body.classList.toggle('panel-hidden',!open);$('
 $('#menu').onclick=()=>setPanel(document.body.classList.contains('panel-hidden'));
 setPanel(innerWidth>760);
 $('#home').onclick=()=>select('earth');
+if($('#snap'))$('#snap').onclick=()=>{
+  renderer.render(scene,camera);
+  const a=document.createElement('a');
+  a.href=canvas.toDataURL('image/png');
+  a.download=`void-kozmos-${Date.now()}.png`;
+  a.click();
+  notify('SAHNE FOTOĞRAFI İNDİRİLDİ');
+};
 const keys=new Set();let looking=false,yaw=0,pitch=0;
 const notify=msg=>{const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(notify.timer);notify.timer=setTimeout(()=>el.classList.remove('show'),2400)};
 $('#mode').onclick=()=>{
@@ -233,3 +241,4 @@ select('earth',true);
 const simulator=createSimulator({scene,camera,controls,objects,ambient,light,sunFill,flyTo,select,notify,setPanel});
 requestAnimationFrame(frame);
 setTimeout(()=>$('#loading').classList.add('done'),reduceMotion?50:350);
+
