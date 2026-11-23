@@ -6,6 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { bodies } from './data.js';
 import { createSimulator } from './sim.js';
+import { createSatelliteSystem } from './satellites.js';
 
 const $=selector=>document.querySelector(selector);
 const canvas=$('#space');
@@ -363,59 +364,69 @@ const earthClouds=new THREE.Mesh(
 );
 earthClouds.raycast=()=>{};
 earthEntry.mesh.add(earthClouds);earthEntry.mesh.userData.clouds=earthClouds;
-const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(1.045,48,32),new THREE.ShaderMaterial({
- uniforms:{intensity:{value:.35}},vertexShader:`varying vec3 n;varying vec3 v;void main(){vec4 p=modelViewMatrix*vec4(position,1.0);n=normalize(normalMatrix*normal);v=normalize(-p.xyz);gl_Position=projectionMatrix*p;}`,
- fragmentShader:`varying vec3 n;varying vec3 v;uniform float intensity;void main(){float rim=pow(1.0-abs(dot(normalize(n),normalize(v))),3.0);gl_FragColor=vec4(0.22,0.55,1.0,rim*intensity);}`,
- transparent:true,depthWrite:false,side:THREE.FrontSide,blending:THREE.AdditiveBlending}));
-atmosphere.raycast=()=>{};
-earthEntry.mesh.add(atmosphere);earthEntry.mesh.userData.atmosphere=atmosphere;
 
-// Major Moons orbiting Jupiter (Io, Europa, Ganymede) & Saturn (Titan)
-const majorMoons=[],moonOrbitLines=[];
-const majorMoonDefs=[
-  {parentId:'jupiter',id:'io',color:0xe9c95d,radius:.095,dist:1.52,speed:.42,spin:.24,angle:.65,inc:.02},
-  {parentId:'jupiter',id:'europa',color:0xdbe9f4,radius:.085,dist:1.92,speed:.27,spin:.18,angle:2.55,inc:.045},
-  {parentId:'jupiter',id:'ganymede',color:0xb7a796,radius:.125,dist:2.42,speed:.16,spin:.14,angle:4.72,inc:.03},
-  {parentId:'saturn',id:'titan',color:0xe3a959,radius:.14,dist:2.75,speed:.15,spin:.12,angle:1.85,inc:.025,haze:0xffbe66}
+// Subtle, non-blooming atmospheric Fresnel rim shells (shared SphereGeometry, rgb * intensity <= 0.30 < 0.92 bloom threshold)
+const atmoGeo=new THREE.SphereGeometry(1,48,32);
+function createAtmosphereRimMaterial(r,g,b,intensityVal,powerVal){
+  return new THREE.ShaderMaterial({
+    uniforms:{
+      uColor:{value:new THREE.Vector3(r,g,b)},
+      intensity:{value:intensityVal},
+      uPower:{value:powerVal}
+    },
+    vertexShader:`
+      varying vec3 n;
+      varying vec3 v;
+      void main(){
+        vec4 p=modelViewMatrix*vec4(position,1.0);
+        n=normalize(normalMatrix*normal);
+        v=normalize(-p.xyz);
+        gl_Position=projectionMatrix*p;
+      }
+    `,
+    fragmentShader:`
+      varying vec3 n;
+      varying vec3 v;
+      uniform vec3 uColor;
+      uniform float intensity;
+      uniform float uPower;
+      void main(){
+        float rim=pow(clamp(1.0-abs(dot(normalize(n),normalize(v))),0.0,1.0),uPower);
+        gl_FragColor=vec4(uColor,rim*intensity);
+      }
+    `,
+    transparent:true,
+    depthWrite:false,
+    side:THREE.FrontSide,
+    blending:THREE.AdditiveBlending
+  });
+}
+const planetAtmosphereSpecs=[
+  {id:'venus',rgb:[0.86,0.68,0.42],intensity:0.28,power:2.8,radius:1.052},
+  {id:'earth',rgb:[0.22,0.55,1.00],intensity:0.35,power:3.0,radius:1.045},
+  {id:'mars',rgb:[0.82,0.48,0.34],intensity:0.20,power:3.6,radius:1.038},
+  {id:'jupiter',rgb:[0.80,0.68,0.54],intensity:0.22,power:3.3,radius:1.040},
+  {id:'saturn',rgb:[0.84,0.75,0.56],intensity:0.21,power:3.4,radius:1.042},
+  {id:'uranus',rgb:[0.45,0.80,0.84],intensity:0.27,power:3.0,radius:1.046},
+  {id:'neptune',rgb:[0.26,0.52,0.88],intensity:0.32,power:2.9,radius:1.048}
 ];
-for(const def of majorMoonDefs){
-  const parentEntry=objects.get(def.parentId);
-  if(!parentEntry)continue;
-  const carrier=new THREE.Group();
-  parentEntry.mesh.add(carrier);
-  const mPivot=new THREE.Group();
-  mPivot.rotation.x=def.inc;
-  mPivot.rotation.y=def.angle;
-  carrier.add(mPivot);
-  const mMesh=new THREE.Mesh(
-    new THREE.SphereGeometry(def.radius,24,16),
-    new THREE.MeshStandardMaterial({map:texture({id:def.id,color:def.color}),roughness:.92,metalness:0})
+for(const spec of planetAtmosphereSpecs){
+  const entry=objects.get(spec.id);
+  if(!entry)continue;
+  const atmo=new THREE.Mesh(
+    atmoGeo,
+    createAtmosphereRimMaterial(spec.rgb[0],spec.rgb[1],spec.rgb[2],spec.intensity,spec.power)
   );
-  mMesh.position.x=def.dist;
-  mMesh.userData.id=def.parentId;
-  mPivot.add(mMesh);
-  if(def.haze){
-    const haze=new THREE.Mesh(
-      new THREE.SphereGeometry(def.radius*1.18,20,14),
-      new THREE.MeshBasicMaterial({color:def.haze,transparent:true,opacity:.22,blending:THREE.AdditiveBlending,depthWrite:false})
-    );
-    haze.raycast=()=>{};
-    mMesh.add(haze);
-  }
-  const mPts=[];
-  for(let i=0;i<=96;i++){const a=i*Math.PI*2/96;mPts.push(new THREE.Vector3(Math.cos(a)*def.dist,0,Math.sin(a)*def.dist))}
-  const mLine=new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(mPts),
-    new THREE.LineBasicMaterial({color:def.color,transparent:true,opacity:.2,blending:THREE.AdditiveBlending,depthWrite:false})
-  );
-  mLine.raycast=()=>{};
-  mPivot.add(mLine);
-  moonOrbitLines.push(mLine);
-  majorMoons.push({parentId:def.parentId,parentMesh:parentEntry.mesh,carrier,pivot:mPivot,mesh:mMesh,angle:def.angle,speed:def.speed,spin:def.spin});
+  atmo.scale.setScalar(spec.radius);
+  atmo.raycast=()=>{};
+  entry.mesh.add(atmo);
+  entry.mesh.userData.atmosphere=atmo;
 }
 
-// Main Asteroid Belt (between Mars r=29 and Jupiter r=41, ~1100 instanced tumbling rocky asteroids)
-const ASTEROID_COUNT=1100;
+// Main Asteroid Belt (between Mars r=29 and Jupiter r=41): 2 static pre-baked InstancedMesh concentric sub-rings
+// rotated on GPU at differential Keplerian speeds (0 per-frame CPU matrix rebuilds)
+const INNER_ASTEROID_COUNT=550;
+const OUTER_ASTEROID_COUNT=550;
 const asteroidGeo=new THREE.DodecahedronGeometry(1,0);
 {
   const posAttr=asteroidGeo.attributes.position;
@@ -431,37 +442,34 @@ const asteroidMat=new THREE.MeshStandardMaterial({color:0x4a4540,roughness:.98,m
 const asteroidBeltGroup=new THREE.Group();
 asteroidBeltGroup.rotation.x=.026;
 scene.add(asteroidBeltGroup);
-const asteroidMesh=new THREE.InstancedMesh(asteroidGeo,asteroidMat,ASTEROID_COUNT);
-asteroidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-asteroidMesh.frustumCulled=false;
-asteroidBeltGroup.add(asteroidMesh);
 
-const astR=new Float32Array(ASTEROID_COUNT),astAngle=new Float32Array(ASTEROID_COUNT),astY=new Float32Array(ASTEROID_COUNT);
-const astDrift=new Float32Array(ASTEROID_COUNT),astRx=new Float32Array(ASTEROID_COUNT),astRy=new Float32Array(ASTEROID_COUNT),astRz=new Float32Array(ASTEROID_COUNT);
-const astSpinX=new Float32Array(ASTEROID_COUNT),astSpinY=new Float32Array(ASTEROID_COUNT);
-const astSx=new Float32Array(ASTEROID_COUNT),astSy=new Float32Array(ASTEROID_COUNT),astSz=new Float32Array(ASTEROID_COUNT);
 const astDummy=new THREE.Object3D();
+const astColor=new THREE.Color();
 const astPalette=[new THREE.Color(0x9b8f82),new THREE.Color(0x7c756d),new THREE.Color(0xb0997e),new THREE.Color(0x6c6662),new THREE.Color(0xa69b8f)];
-for(let i=0;i<ASTEROID_COUNT;i++){
-  const r=32.0+(rand()+rand())*.5*6.4;
-  const a=rand()*Math.PI*2;
-  const y=(rand()+rand()-1)*1.45;
-  const base=.05+Math.pow(rand(),2.1)*.14;
-  astR[i]=r;astAngle[i]=a;astY[i]=y;
-  astDrift[i]=.0045*(35.2/r);
-  astRx[i]=rand()*Math.PI*2;astRy[i]=rand()*Math.PI*2;astRz[i]=rand()*Math.PI*2;
-  astSpinX[i]=(rand()-.5)*1.4;astSpinY[i]=(rand()-.5)*1.6;
-  astSx[i]=base*(.72+rand()*.6);astSy[i]=base*(.62+rand()*.52);astSz[i]=base*(.72+rand()*.6);
-  astDummy.position.set(Math.cos(a)*r,y,Math.sin(a)*r);
-  astDummy.rotation.set(astRx[i],astRy[i],astRz[i]);
-  astDummy.scale.set(astSx[i],astSy[i],astSz[i]);
-  astDummy.updateMatrix();
-  asteroidMesh.setMatrixAt(i,astDummy.matrix);
-  const c=astPalette[Math.floor(rand()*astPalette.length)].clone().multiplyScalar(.38+rand()*.24);
-  asteroidMesh.setColorAt(i,c);
+function buildAsteroidRing(count,rMin,rSpan,ySpread){
+  const mesh=new THREE.InstancedMesh(asteroidGeo,asteroidMat,count);
+  mesh.frustumCulled=false;
+  for(let i=0;i<count;i++){
+    const r=rMin+(rand()+rand())*.5*rSpan;
+    const a=rand()*Math.PI*2;
+    const y=(rand()+rand()-1)*ySpread;
+    const base=.05+Math.pow(rand(),2.1)*.14;
+    astDummy.position.set(Math.cos(a)*r,y,Math.sin(a)*r);
+    astDummy.rotation.set(rand()*Math.PI*2,rand()*Math.PI*2,rand()*Math.PI*2);
+    astDummy.scale.set(base*(.72+rand()*.6),base*(.62+rand()*.52),base*(.72+rand()*.6));
+    astDummy.updateMatrix();
+    mesh.setMatrixAt(i,astDummy.matrix);
+    astColor.copy(astPalette[Math.floor(rand()*astPalette.length)]).multiplyScalar(.38+rand()*.24);
+    mesh.setColorAt(i,astColor);
+  }
+  mesh.instanceMatrix.needsUpdate=true;
+  if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+  return mesh;
 }
-asteroidMesh.instanceMatrix.needsUpdate=true;
-if(asteroidMesh.instanceColor)asteroidMesh.instanceColor.needsUpdate=true;
+const innerAsteroidRing=buildAsteroidRing(INNER_ASTEROID_COUNT,32.0,3.4,1.35);
+const outerAsteroidRing=buildAsteroidRing(OUTER_ASTEROID_COUNT,35.0,3.6,1.55);
+outerAsteroidRing.rotation.z=.012;
+asteroidBeltGroup.add(innerAsteroidRing,outerAsteroidRing);
 
 // Distant Kuiper Belt (~750 icy glinting particles at r=90..115)
 const KUIPER_COUNT=750;
@@ -520,16 +528,20 @@ kuiperBelt.rotation.x=.045;
 scene.add(kuiperBelt);
 
 scene.updateMatrixWorld(true);
-const moon=new THREE.Mesh(new THREE.SphereGeometry(.27,24,16),new THREE.MeshStandardMaterial({map:texture({id:'moon',color:0xaaa69b}),roughness:1}));scene.add(moon);
-let moonAngle=0;
+const satSystem=createSatelliteSystem({scene,objects,textureFactory:texture});
+const moon=satSystem.getEarthMoonMesh();
 let selected='earth',quality='HIGH',paused=false,speed=1,mode='orbit',transition=null;
-const target=new THREE.Vector3(),temp=new THREE.Vector3(),prev=new THREE.Vector3();
+const temp=new THREE.Vector3(),prev=new THREE.Vector3(),nextPos=new THREE.Vector3(),flightDir=new THREE.Vector3();
 const saturn=objects.get('saturn').mesh.getWorldPosition(new THREE.Vector3());
 controls.target.copy(saturn);camera.position.copy(saturn).add(new THREE.Vector3(14,8,22));camera.lookAt(saturn);controls.update();
 const nav=$('#planet-list');
 bodies.forEach((body,i)=>{
   const button=document.createElement('button');button.type='button';button.className='planet-item';button.dataset.id=body.id;
-  button.innerHTML='<span class="planet-number">'+String(i+1).padStart(2,'0')+'</span><span class="planet-icon" style="color:#'+body.color.toString(16).padStart(6,'0')+'">'+body.icon+'</span><span>'+body.name+'</span><span class="planet-arrow">↗</span>';
+  const numSpan=document.createElement('span');numSpan.className='planet-number';numSpan.textContent=String(i+1).padStart(2,'0');
+  const iconSpan=document.createElement('span');iconSpan.className='planet-icon';iconSpan.style.color='#'+body.color.toString(16).padStart(6,'0');iconSpan.textContent=body.icon;
+  const nameSpan=document.createElement('span');nameSpan.textContent=body.name;
+  const arrowSpan=document.createElement('span');arrowSpan.className='planet-arrow';arrowSpan.textContent='↗';
+  button.append(numSpan,iconSpan,nameSpan,arrowSpan);
   button.onclick=()=>{select(body.id);(innerWidth<=760&&setPanel(false))};nav.append(button);
 });
 const reduceMotion=matchMedia('(prefers-reduced-motion:reduce)').matches;
@@ -556,7 +568,7 @@ function select(id,animate=true){
 $('#explore').onclick=()=>select(selected);
 $('#reset').onclick=()=>{selected='sun';flyTo(new THREE.Vector3(97,68,120),new THREE.Vector3(0,0,0),1.5);if(innerWidth<=760)setPanel(false)};
 $('#pause').onclick=()=>{paused=!paused;$('#pause').textContent=paused?'▶ DEVAM':'Ⅱ DURAKLAT'};
-$('#speed').oninput=e=>{speed=+e.target.value;$('#speed-label').textContent=speed.toFixed(1)+'×'};
+$('#speed').oninput=e=>{const v=Number(e.target.value);speed=Number.isFinite(v)?Math.max(0,Math.min(5,v)):1;$('#speed-label').textContent=speed.toFixed(1)+'×'};
 function renderScene(){
   if(composer)composer.render();
   else renderer.render(scene,camera);
@@ -580,7 +592,7 @@ const toggleOrbitsBtn=$('#toggle-orbits');
 if(toggleOrbitsBtn){
   toggleOrbitsBtn.onclick=()=>{
     orbitLinesGroup.visible=!orbitLinesGroup.visible;
-    for(const line of moonOrbitLines)line.visible=orbitLinesGroup.visible;
+    satSystem.setOrbitsVisible(orbitLinesGroup.visible);
     toggleOrbitsBtn.setAttribute('aria-pressed',String(orbitLinesGroup.visible));
     notify(orbitLinesGroup.visible?'YÖRÜNGE ÇİZGİLERİ AÇILDI':'YÖRÜNGE ÇİZGİLERİ GİZLENDİ');
   };
@@ -770,6 +782,8 @@ function addShake(intensity=.35,duration=.8){
   shakeTime=Math.max(shakeTime,duration);
 }
 
+const coordsEl=$('#coordinates');
+const flightSpeedEl=$('#flight-speed');
 let last=performance.now(),counter=0,elapsed=0;
 function frame(now){
   requestAnimationFrame(frame);
@@ -796,7 +810,7 @@ function frame(now){
 
   const bhOn=simulator.isBlackHoleActive();
   if(!paused){
-    prev.copy(objects.get(selected).mesh.getWorldPosition(new THREE.Vector3()));
+    objects.get(selected).mesh.getWorldPosition(prev);
     for(const e of objects.values()){
       if(simulator.isBodyCaptured(e.body.id))continue;
       e.mesh.rotation.y+=e.body.spin*dt*60*speed;
@@ -805,33 +819,13 @@ function frame(now){
     if(!simulator.isBodyCaptured('earth')){
       earthClouds.rotation.y+=dt*.045*speed;
     }
-    for(const m of majorMoons){
-      if(simulator.isBodyCaptured(m.parentId))continue;
-      m.angle+=m.speed*dt*speed;
-      m.carrier.rotation.y=-m.parentMesh.rotation.y;
-      m.pivot.rotation.y=m.angle;
-      m.mesh.rotation.y+=m.spin*dt*speed;
-    }
-    asteroidBeltGroup.rotation.y+=dt*.012*speed;
-    if(quality==='HIGH'&&!reduceMotion){
-      const dts=dt*speed;
-      for(let i=0;i<ASTEROID_COUNT;i++){
-        astAngle[i]+=astDrift[i]*dts;
-        astRx[i]+=astSpinX[i]*dts;
-        astRy[i]+=astSpinY[i]*dts;
-        const a=astAngle[i],r=astR[i];
-        astDummy.position.set(Math.cos(a)*r,astY[i],Math.sin(a)*r);
-        astDummy.rotation.set(astRx[i],astRy[i],astRz[i]);
-        astDummy.scale.set(astSx[i],astSy[i],astSz[i]);
-        astDummy.updateMatrix();
-        asteroidMesh.setMatrixAt(i,astDummy.matrix);
-      }
-      asteroidMesh.instanceMatrix.needsUpdate=true;
-    }
+    // Pure GPU Keplerian rotation of dual concentric asteroid sub-rings (0 CPU matrix rebuilds)
+    innerAsteroidRing.rotation.y+=dt*.0155*speed;
+    outerAsteroidRing.rotation.y+=dt*.0112*speed;
     kuiperBelt.rotation.y+=dt*.0024*speed;
-    const next=objects.get(selected).mesh.getWorldPosition(new THREE.Vector3());
+    objects.get(selected).mesh.getWorldPosition(nextPos);
     if(mode==='orbit'&&!transition&&selected!=='sun'&&!bhOn){
-      const shift=next.sub(prev);controls.target.add(shift);camera.position.add(shift);
+      nextPos.sub(prev);controls.target.add(nextPos);camera.position.add(nextPos);
     }
   }
   if(transition){
@@ -843,23 +837,23 @@ function frame(now){
   }
   if(mode==='orbit'){controls.update()}
   else{
-    const travel=Number($('#flight-speed').value)*(keys.has('ShiftLeft')||keys.has('ShiftRight')?4:1)*dt;
-    const direction=new THREE.Vector3();
-    if(keys.has('KeyW'))direction.z-=1;if(keys.has('KeyS'))direction.z+=1;
-    if(keys.has('KeyA'))direction.x-=1;if(keys.has('KeyD'))direction.x+=1;
-    if(keys.has('KeyQ'))direction.y-=1;if(keys.has('KeyE'))direction.y+=1;
-    if(direction.lengthSq()){direction.normalize().applyQuaternion(camera.quaternion).multiplyScalar(travel);camera.position.add(direction)}
+    const rawFlight=Number(flightSpeedEl?.value);
+    const flightSpeed=Number.isFinite(rawFlight)?Math.max(2,Math.min(100,rawFlight)):20;
+    const travel=flightSpeed*(keys.has('ShiftLeft')||keys.has('ShiftRight')?4:1)*dt;
+    flightDir.set(0,0,0);
+    if(keys.has('KeyW'))flightDir.z-=1;if(keys.has('KeyS'))flightDir.z+=1;
+    if(keys.has('KeyA'))flightDir.x-=1;if(keys.has('KeyD'))flightDir.x+=1;
+    if(keys.has('KeyQ'))flightDir.y-=1;if(keys.has('KeyE'))flightDir.y+=1;
+    if(flightDir.lengthSq()){flightDir.normalize().applyQuaternion(camera.quaternion).multiplyScalar(travel);camera.position.add(flightDir)}
   }
-  if(++counter%15===0)$('#coordinates').textContent='KAMERA / '+[camera.position.x,camera.position.y,camera.position.z].map(v=>v.toFixed(1)).join(' · ');
+  if(++counter%15===0&&coordsEl)coordsEl.textContent='KAMERA / '+camera.position.x.toFixed(1)+' · '+camera.position.y.toFixed(1)+' · '+camera.position.z.toFixed(1);
   simulator.update(paused?0:dt);
 
-  if(!simulator.isBodyCaptured('moon')){
-    if(!paused)moonAngle+=dt*.12*Math.sqrt(simulator.gravity/100);
-    const earthWorld=earthEntry.mesh.getWorldPosition(temp);
-    moon.position.copy(earthWorld).add(new THREE.Vector3(Math.cos(moonAngle)*3,.4,Math.sin(moonAngle)*3));
-    moon.visible=earthEntry.mesh.visible;
-    if(simulator.gravity===0)moon.position.y+=Math.min(8,now/1000%30)*.2;
-  }
+  satUpdateState.paused=paused;
+  satUpdateState.speed=speed;
+  satUpdateState.gravity=simulator.gravity;
+  satUpdateState.sunGone=simulator.isSunGone();
+  satSystem.update(dt,satUpdateState);
 
   // Non-destructive damped camera shake
   if(shakeTime>0){
@@ -889,6 +883,7 @@ function resize(){
 addEventListener('resize',resize);
 select('earth',true);
 const simulator=createSimulator({scene,camera,controls,objects,moon,ambient,light,sunFill,flyTo,select,notify,setPanel,addShake,pulseBloom,playSfx});
+const satUpdateState={paused:false,speed:1,gravity:100,camera,isBodyCaptured:id=>simulator.isBodyCaptured(id),sunGone:false};
 requestAnimationFrame(frame);
 setTimeout(()=>$('#loading').classList.add('done'),reduceMotion?50:350);
 
