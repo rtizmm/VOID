@@ -312,7 +312,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   const sphere = earth.mesh;
 
   const heat = new THREE.Mesh(
-    new THREE.SphereGeometry(1.008, 40, 28),
+    new THREE.SphereGeometry(1.02, 40, 28),
     new THREE.MeshBasicMaterial({ color: 0xff4d12, transparent: true, opacity: 0, depthWrite: false })
   );
   sphere.add(heat);
@@ -456,6 +456,73 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   scene.add(trailGroup);
   const rogueGroup = new THREE.Group();
   scene.add(rogueGroup);
+  const stormGroup = new THREE.Group();
+  scene.add(stormGroup);
+  const pulseGroup = new THREE.Group();
+  scene.add(pulseGroup);
+
+  // Glowing tidal & impact spark particle pool
+  const SPARK_COUNT = 360;
+  const sparkPos = new Float32Array(SPARK_COUNT * 3);
+  const sparkCol = new Float32Array(SPARK_COUNT * 3);
+  const sparkGeo = new THREE.BufferGeometry();
+  sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
+  sparkGeo.setAttribute('color', new THREE.BufferAttribute(sparkCol, 3));
+  const sparkMat = new THREE.PointsMaterial({
+    size: 0.24,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.95,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const sparkPoints = new THREE.Points(sparkGeo, sparkMat);
+  sparkPoints.frustumCulled = false;
+  sparkPoints.visible = false;
+  scene.add(sparkPoints);
+  const sparkPool = Array.from({ length: SPARK_COUNT }, () => ({
+    active: false,
+    pos: new THREE.Vector3(),
+    vel: new THREE.Vector3(),
+    life: 0,
+    maxLife: 1,
+    r: 1,
+    g: 0.6,
+    b: 0.2,
+    gravPull: false
+  }));
+  let sparkCursor = 0;
+
+  function emitSpark(origin, velocity, colorHex, maxLife = 1.1, gravPull = false) {
+    const s = sparkPool[sparkCursor];
+    sparkCursor = (sparkCursor + 1) % SPARK_COUNT;
+    s.active = true;
+    s.pos.copy(origin);
+    s.vel.copy(velocity);
+    s.life = 0;
+    s.maxLife = maxLife;
+    const c = new THREE.Color(colorHex);
+    s.r = c.r;
+    s.g = c.g;
+    s.b = c.b;
+    s.gravPull = gravPull;
+    sparkPoints.visible = true;
+  }
+
+  function clearSparks() {
+    for (let i = 0; i < SPARK_COUNT; i++) {
+      sparkPool[i].active = false;
+      sparkPos[i * 3] = 0;
+      sparkPos[i * 3 + 1] = -9999;
+      sparkPos[i * 3 + 2] = 0;
+      sparkCol[i * 3] = 0;
+      sparkCol[i * 3 + 1] = 0;
+      sparkCol[i * 3 + 2] = 0;
+    }
+    sparkGeo.attributes.position.needsUpdate = true;
+    sparkGeo.attributes.color.needsUpdate = true;
+    sparkPoints.visible = false;
+  }
 
   // Snapshot original Solar System state for clean reset()
   const originalBodies = new Map();
@@ -472,16 +539,20 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     }
   }
 
-  let capturedBodies = []; // { id, mesh, pos, vel, baseScale, trail, swallowed, isEarth, isMoon, isRogue }
+  let capturedBodies = []; // { id, mesh, pos, vel, baseScale, trail, swallowed, isEarth, isMoon, isRogue, colorHex }
   let bhActive = false;
   let bhMassVal = 8;
   let bhScale = 1;
   let bhPos = new THREE.Vector3();
+  let bhOrigin = new THREE.Vector3();
   let bhAge = 0;
+  let bhDriftPhase = 0;
   let earthWillShatter = false;
   let earthSwallowed = false;
   let grbTime = 0;
   let flashTime = 0;
+  let storm = null;
+  const activePulses = [];
 
   const dirs = Array.from({ length: 220 }, (_, i) => {
     const y = 1 - (2 * (i + 0.5)) / 220;
@@ -543,6 +614,140 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     earthSwallowed = false;
   }
 
+  function clearStorm() {
+    if (!storm) return;
+    for (const m of storm.meteors) {
+      if (m.mesh) {
+        stormGroup.remove(m.mesh);
+        m.mesh.geometry?.dispose();
+        m.mesh.material?.dispose();
+      }
+      if (m.tail) {
+        stormGroup.remove(m.tail);
+        m.tail.geometry?.dispose();
+        m.tail.material?.dispose();
+      }
+      if (m.trail) {
+        trailGroup.remove(m.trail.line, m.trail.sparks);
+        m.trail.dispose();
+      }
+    }
+    storm = null;
+  }
+
+  function clearPulses() {
+    for (const p of activePulses) {
+      if (p.ring) {
+        pulseGroup.remove(p.ring);
+        p.ring.geometry?.dispose();
+        p.ring.material?.dispose();
+      }
+      if (p.flash) {
+        pulseGroup.remove(p.flash);
+        p.flash.geometry?.dispose();
+        p.flash.material?.dispose();
+      }
+    }
+    activePulses.length = 0;
+  }
+
+  function addCraterAt(hitNormal, damage) {
+    localNormal.copy(hitNormal).applyQuaternion(sphere.getWorldQuaternion(new THREE.Quaternion()).invert());
+    const mark = new THREE.Group();
+    mark.position.copy(localNormal).multiplyScalar(1.022);
+    mark.quaternion.setFromUnitVectors(zAxis, localNormal);
+    const radius = Math.min(0.7, 0.04 + damage * 0.48);
+    const crater = new THREE.Mesh(
+      new THREE.CircleGeometry(radius, 36),
+      new THREE.MeshBasicMaterial({ color: 0x130e0c, side: THREE.DoubleSide })
+    );
+    const rim = new THREE.Mesh(
+      new THREE.RingGeometry(radius * 0.8, radius, 36),
+      new THREE.MeshBasicMaterial({ color: 0xff8b38, side: THREE.DoubleSide })
+    );
+    rim.position.z = 0.004;
+    mark.add(crater, rim);
+    scarRoot.add(mark);
+    while (scarRoot.children.length > 24) {
+      const old = scarRoot.children[0];
+      old.traverse(x => {
+        x.geometry?.dispose();
+        x.material?.dispose();
+      });
+      scarRoot.remove(old);
+    }
+  }
+
+  function spawnImpactPulse(hitPos, hitNormal, scaleFactor = 1) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.76, 1.0, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0xffc67d,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    ring.position.copy(hitPos).addScaledVector(hitNormal, 0.04);
+    ring.quaternion.setFromUnitVectors(zAxis, hitNormal);
+    ring.scale.setScalar(0.12);
+
+    const flash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42 * scaleFactor, 16, 12),
+      new THREE.MeshBasicMaterial({
+        color: 0xffe4b8,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    flash.position.copy(hitPos);
+    flash.scale.setScalar(0.25);
+
+    pulseGroup.add(ring, flash);
+    activePulses.push({
+      ring,
+      flash,
+      age: 0,
+      duration: 0.95 + scaleFactor * 0.35,
+      scaleFactor,
+      normal: hitNormal.clone()
+    });
+  }
+
+  function capturePlanet(id, entry, gm, shatter) {
+    if (capturedBodies.some(c => c.id === id)) return;
+    const wPos = entry.mesh.getWorldPosition(new THREE.Vector3());
+    scene.attach(entry.mesh);
+
+    const toBh = bhPos.clone().sub(wPos);
+    const dist = Math.max(1.8, toBh.length());
+    const vKepler = Math.sqrt(gm / dist);
+    const tiltAxis = new THREE.Vector3((Math.random() - 0.5) * 0.35, 1, (Math.random() - 0.5) * 0.35).normalize();
+    const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
+    const speedRatio = id === 'earth' ? (shatter ? 0.78 : 0.96) : 0.8 + Math.random() * 0.12;
+    const trail = createTrailRibbon(entry.body.color, id === 'earth' ? 88 : 68);
+    trailGroup.add(trail.line, trail.sparks);
+
+    capturedBodies.push({
+      id,
+      mesh: entry.mesh,
+      pos: wPos,
+      vel: tang.multiplyScalar(vKepler * speedRatio),
+      baseScale: originalBodies.get(id).baseScale.clone(),
+      trail,
+      swallowed: false,
+      isMoon: false,
+      isEarth: id === 'earth',
+      isRogue: false,
+      colorHex: entry.body.color,
+      lockedToSafeOrbit: id === 'earth' && !shatter
+    });
+  }
+
   function initBlackHoleCapture(massMultiplier, shatter) {
     clearCapturedBodies();
     const earthWorld = sphere.getWorldPosition(new THREE.Vector3());
@@ -552,6 +757,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     // Position the Black Hole dramatically in view near Earth
     bhPos.copy(earthWorld).addScaledVector(right, 6.2).addScaledVector(camDir, -2.4);
     bhPos.y = earthWorld.y + 0.4;
+    bhOrigin.copy(bhPos);
+    bhDriftPhase = 0;
     bhGroup.position.copy(bhPos);
 
     // Position spacetime grid centered under the Black Hole
@@ -559,96 +766,86 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     spacetimeGrid.visible = true;
     gridMat.uniforms.uBhPos.value.copy(bhPos);
 
-    // 1. Capture the Moon immediately so user sees dramatic spiral + spaghettification right away
+    const gm = 26 + massMultiplier * 2.4;
+
+    // 1. Capture the Moon immediately for dramatic 3D Keplerian spiral + spaghettification
     if (moon) {
       const mPos = moon.position.clone();
       const toBh = bhPos.clone().sub(mPos);
-      const tang = new THREE.Vector3(-toBh.z, 0.25, toBh.x).normalize();
-      const trail = createTrailRibbon(0x9ce2ff, 64);
+      const mDist = Math.max(1.8, toBh.length());
+      const vKepler = Math.sqrt(gm / mDist);
+      const tiltAxis = new THREE.Vector3(0.22, 1, -0.18).normalize();
+      const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
+      const trail = createTrailRibbon(0x9ce2ff, 80);
       trailGroup.add(trail.line, trail.sparks);
       capturedBodies.push({
         id: 'moon',
         mesh: moon,
         pos: mPos,
-        vel: tang.multiplyScalar(3.4 + massMultiplier * 0.04),
+        vel: tang.multiplyScalar(vKepler * 0.84),
         baseScale: new THREE.Vector3(1, 1, 1),
         trail,
         swallowed: false,
         isMoon: true,
         isEarth: false,
-        isRogue: false
+        isRogue: false,
+        colorHex: 0x9ce2ff
       });
     }
 
     // 2. Capture Earth & nearby planets (detaching temporarily to scene space for free 3D spiral orbits)
-    const pullRadius = 18 + massMultiplier * 1.9;
+    const pullRadius = 22 + massMultiplier * 2.1;
     if (objects) {
       for (const [id, entry] of objects.entries()) {
         if (id === 'sun') continue;
         const wPos = entry.mesh.getWorldPosition(new THREE.Vector3());
         const dist = wPos.distanceTo(bhPos);
-        const shouldCapture = id === 'earth' || dist < pullRadius;
-        if (!shouldCapture) continue;
-
-        // Move mesh to world space while preserving visual transform
-        scene.attach(entry.mesh);
-        const toBh = bhPos.clone().sub(wPos);
-        const tang = new THREE.Vector3(-toBh.z, (Math.random() - 0.5) * 0.2, toBh.x).normalize();
-        const speedFactor = id === 'earth' ? (shatter ? 2.4 : 3.9) : 2.6 + Math.min(3.5, dist * 0.06);
-        const trail = createTrailRibbon(entry.body.color, id === 'earth' ? 72 : 58);
-        trailGroup.add(trail.line, trail.sparks);
-
-        capturedBodies.push({
-          id,
-          mesh: entry.mesh,
-          pos: wPos,
-          vel: tang.multiplyScalar(speedFactor),
-          baseScale: originalBodies.get(id).baseScale.clone(),
-          trail,
-          swallowed: false,
-          isMoon: false,
-          isEarth: id === 'earth',
-          isRogue: false,
-          lockedToSafeOrbit: id === 'earth' && !shatter
-        });
+        if (id === 'earth' || dist < pullRadius) {
+          capturePlanet(id, entry, gm, shatter);
+        }
       }
     }
 
-    // 3. Spawn 6 bright rogue planetoids/comets around the vicinity for immediate spaghettification fireworks
-    const rogueColors = [0x78e6ff, 0xffb366, 0xd19aff, 0x8ef5c2, 0xff7e9d, 0xffe484];
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2 + 0.35;
-      const dist = 5.5 + (i % 3) * 3.1;
-      const rPos = bhPos.clone().add(new THREE.Vector3(Math.cos(angle) * dist, (i % 2 ? 1 : -1) * (0.6 + i * 0.25), Math.sin(angle) * dist));
-      const rSize = 0.16 + (i % 3) * 0.08;
+    // 3. Spawn 8 bright rogue planetoids/comets on varied 3D inclined Keplerian spirals
+    const rogueColors = [0x78e6ff, 0xffb366, 0xd19aff, 0x8ef5c2, 0xff7e9d, 0xffe484, 0x6cb8ff, 0xff9d6e];
+    for (let i = 0; i < rogueColors.length; i++) {
+      const angle = (i / rogueColors.length) * Math.PI * 2 + 0.35;
+      const dist = 5.4 + (i % 4) * 2.55;
+      const elev = (i % 2 ? 1 : -1) * (0.7 + (i % 3) * 0.75);
+      const rPos = bhPos.clone().add(new THREE.Vector3(Math.cos(angle) * dist, elev, Math.sin(angle) * dist));
+      const rSize = 0.15 + (i % 3) * 0.08;
       const rMesh = new THREE.Mesh(
         new THREE.IcosahedronGeometry(rSize, 2),
         new THREE.MeshStandardMaterial({
           color: rogueColors[i],
           emissive: rogueColors[i],
-          emissiveIntensity: 0.45,
-          roughness: 0.7
+          emissiveIntensity: 0.5,
+          roughness: 0.65
         })
       );
       rMesh.position.copy(rPos);
       rogueGroup.add(rMesh);
 
       const toBh = bhPos.clone().sub(rPos);
-      const tang = new THREE.Vector3(-toBh.z, (i % 2 ? 0.35 : -0.35), toBh.x).normalize();
-      const trail = createTrailRibbon(rogueColors[i], 52);
+      const rDist = Math.max(1.8, toBh.length());
+      const vKepler = Math.sqrt(gm / rDist);
+      const tiltAxis = new THREE.Vector3((i % 2 ? 0.3 : -0.25), 1, (i % 3 ? -0.22 : 0.28)).normalize();
+      const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
+      const trail = createTrailRibbon(rogueColors[i], 64);
       trailGroup.add(trail.line, trail.sparks);
 
       capturedBodies.push({
         id: 'rogue-' + i,
         mesh: rMesh,
         pos: rPos,
-        vel: tang.multiplyScalar(2.8 + (i % 3) * 0.65),
+        vel: tang.multiplyScalar(vKepler * (0.78 + (i % 3) * 0.06)),
         baseScale: new THREE.Vector3(1, 1, 1),
         trail,
         swallowed: false,
         isMoon: false,
         isEarth: false,
-        isRogue: true
+        isRogue: true,
+        colorHex: rogueColors[i]
       });
     }
   }
@@ -658,28 +855,19 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     age = 0;
     debris.visible = true;
     const ringNormal = normal.clone();
-    localNormal.copy(normal).applyQuaternion(sphere.getWorldQuaternion(new THREE.Quaternion()).invert());
-    const mark = new THREE.Group();
-    mark.position.copy(localNormal).multiplyScalar(1.012);
-    mark.quaternion.setFromUnitVectors(zAxis, localNormal);
-    const radius = Math.min(0.7, 0.035 + r.damage * 0.5);
-    const crater = new THREE.Mesh(new THREE.CircleGeometry(radius, 48), new THREE.MeshBasicMaterial({ color: 0x130e0c, side: THREE.DoubleSide }));
-    const rim = new THREE.Mesh(new THREE.RingGeometry(radius * 0.83, radius, 48), new THREE.MeshBasicMaterial({ color: 0xff8b38, side: THREE.DoubleSide }));
-    rim.position.z = 0.004;
-    mark.add(crater, rim);
-    scarRoot.add(mark);
-    while (scarRoot.children.length > 16) {
-      const old = scarRoot.children[0];
-      old.traverse(x => {
-        x.geometry?.dispose();
-        x.material?.dispose();
-      });
-      scarRoot.remove(old);
-    }
+    addCraterAt(ringNormal, r.damage);
     totalHeat = Math.min(0.85, totalHeat + Math.max(0, r.damage - 0.35) * 0.72);
     heat.material.opacity = totalHeat;
     wave.quaternion.setFromUnitVectors(zAxis, ringNormal);
     sphere.visible = !r.fragment;
+
+    // Emit fiery spark burst from impact point
+    const hitPoint = center.clone().addScaledVector(ringNormal, earth.body.size);
+    for (let i = 0; i < 24; i++) {
+      const spread = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.4);
+      const vel = ringNormal.clone().multiplyScalar(2.0 + Math.random() * 4.5).add(spread);
+      emitSpark(hitPoint, vel, i % 2 ? 0xffb35c : 0xff6526, 0.7 + Math.random() * 0.65, false);
+    }
 
     // Cinematic impact flash, bloom burst, and camera shake
     flashTime = 0.85;
@@ -688,6 +876,161 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     flashSphere.scale.setScalar(0.35);
     addShake(0.18 + r.damage * 0.75, 0.65 + r.damage * 0.85);
     pulseBloom(1.35 + r.damage * 1.15);
+  }
+
+  function updateSparks(dt) {
+    if (!sparkPoints.visible) return;
+    let anyActive = false;
+    const gm = 26 + bhMassVal * 2.4;
+    for (let i = 0; i < SPARK_COUNT; i++) {
+      const s = sparkPool[i];
+      if (!s.active) {
+        sparkCol[i * 3] = 0;
+        sparkCol[i * 3 + 1] = 0;
+        sparkCol[i * 3 + 2] = 0;
+        continue;
+      }
+      s.life += dt;
+      if (s.life >= s.maxLife) {
+        s.active = false;
+        sparkPos[i * 3 + 1] = -9999;
+        sparkCol[i * 3] = 0;
+        sparkCol[i * 3 + 1] = 0;
+        sparkCol[i * 3 + 2] = 0;
+        continue;
+      }
+      anyActive = true;
+      if (s.gravPull && bhActive) {
+        tmpDir.copy(bhPos).sub(s.pos);
+        const d = tmpDir.length();
+        if (d < bhScale * 1.05) {
+          s.active = false;
+          sparkPos[i * 3 + 1] = -9999;
+          continue;
+        }
+        tmpDir.multiplyScalar(1 / Math.max(d, 0.2));
+        s.vel.addScaledVector(tmpDir, (gm * 1.25 / (d * d + 0.8)) * dt);
+        s.vel.multiplyScalar(Math.pow(0.985, dt * 60));
+      } else {
+        s.vel.multiplyScalar(Math.pow(0.96, dt * 60));
+      }
+      s.pos.addScaledVector(s.vel, dt);
+      const fade = Math.pow(1 - s.life / s.maxLife, 1.4);
+      sparkPos[i * 3] = s.pos.x;
+      sparkPos[i * 3 + 1] = s.pos.y;
+      sparkPos[i * 3 + 2] = s.pos.z;
+      sparkCol[i * 3] = s.r * fade * 1.65;
+      sparkCol[i * 3 + 1] = s.g * fade * 1.65;
+      sparkCol[i * 3 + 2] = s.b * fade * 1.65;
+    }
+    sparkGeo.attributes.position.needsUpdate = true;
+    sparkGeo.attributes.color.needsUpdate = true;
+    if (!anyActive) sparkPoints.visible = false;
+  }
+
+  function updatePulses(dt) {
+    for (let i = activePulses.length - 1; i >= 0; i--) {
+      const p = activePulses[i];
+      p.age += dt;
+      const t = clamp01(p.age / p.duration);
+      const inv = 1 - t;
+      p.ring.position.copy(center).addScaledVector(p.normal, earth.body.size * 1.03);
+      p.ring.scale.setScalar(0.12 + t * (1.7 + p.scaleFactor * 1.8));
+      p.ring.material.opacity = inv * inv * 0.9;
+      p.flash.position.copy(center).addScaledVector(p.normal, earth.body.size * 0.98);
+      p.flash.scale.setScalar(0.25 + t * (2.2 * p.scaleFactor));
+      p.flash.material.opacity = inv * inv * 0.95;
+      if (t >= 1) {
+        pulseGroup.remove(p.ring, p.flash);
+        p.ring.geometry?.dispose();
+        p.ring.material?.dispose();
+        p.flash.geometry?.dispose();
+        p.flash.material?.dispose();
+        activePulses.splice(i, 1);
+      }
+    }
+  }
+
+  function updateStorm(dt) {
+    if (!storm) return;
+    storm.elapsed += dt;
+    let remaining = 0;
+
+    for (const m of storm.meteors) {
+      if (m.hit) continue;
+      remaining++;
+      if (storm.elapsed < m.delay) continue;
+
+      if (!m.launched) {
+        m.launched = true;
+        m.mesh.visible = true;
+        m.tail.visible = true;
+      }
+
+      m.flightTime += dt;
+      const t = clamp01(m.flightTime / m.duration);
+      const easeT = t * t * (0.45 + 0.55 * t); // Accelerating infall
+      const dist = earth.body.size + m.startDist * (1 - easeT);
+      const arc = Math.sin(t * Math.PI) * m.arcAmp;
+
+      tmpVec
+        .copy(center)
+        .addScaledVector(m.dir, dist)
+        .addScaledVector(m.tangent, arc);
+      m.mesh.position.copy(tmpVec);
+      m.mesh.rotation.x += dt * 4.5;
+      m.mesh.rotation.y += dt * 3.8;
+
+      tmpDir.copy(tmpVec).sub(center).normalize();
+      m.tail.position.copy(tmpVec).addScaledVector(tmpDir, 1.15);
+      m.tail.quaternion.setFromUnitVectors(upVec, tmpDir);
+      m.trail.push(tmpVec, 0.55 + t * 0.45);
+
+      if (t >= 1) {
+        m.hit = true;
+        remaining--;
+        storm.struck++;
+
+        // Remove meteor mesh & tail, dispose trail
+        stormGroup.remove(m.mesh, m.tail);
+        m.mesh.geometry?.dispose();
+        m.mesh.material?.dispose();
+        m.tail.geometry?.dispose();
+        m.tail.material?.dispose();
+        trailGroup.remove(m.trail.line, m.trail.sparks);
+        m.trail.dispose();
+        m.mesh = null;
+        m.tail = null;
+        m.trail = null;
+
+        const hitDir = m.dir.clone().normalize();
+        const hitPos = center.clone().addScaledVector(hitDir, earth.body.size);
+        const dmg = 0.14 + storm.intensity * 0.34;
+        addCraterAt(hitDir, dmg);
+        spawnImpactPulse(hitPos, hitDir, 0.7 + storm.intensity * 0.85);
+
+        // Burst of molten sparks from impact site
+        const sparkN = 10 + Math.round(storm.intensity * 10);
+        for (let k = 0; k < sparkN; k++) {
+          const jitter = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.6);
+          const sVel = hitDir.clone().multiplyScalar(1.6 + Math.random() * 3.4).add(jitter);
+          emitSpark(hitPos, sVel, k % 2 ? 0xffcb78 : 0xff5e1f, 0.55 + Math.random() * 0.5, false);
+        }
+
+        totalHeat = Math.min(0.85, totalHeat + 0.03 + storm.intensity * 0.055);
+        heat.material.opacity = totalHeat;
+        addShake(0.09 + storm.intensity * 0.22, 0.28 + storm.intensity * 0.18);
+        pulseBloom(0.9 + storm.intensity * 0.72);
+
+        storm.onStrike?.(storm.struck, storm.total);
+      }
+    }
+
+    if (remaining === 0) {
+      const doneCb = storm.onComplete;
+      storm = null;
+      doneCb?.();
+    }
   }
 
   function updateSwarm(dt) {
@@ -725,38 +1068,81 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
 
   function updateCapturedBodies(dt) {
     const ehRadius = 1.05 * bhScale;
-    const tidalRadius = 5.4 * bhScale;
-    const gm = 24 + bhMassVal * 2.2;
+    const tidalRadius = 5.8 * bhScale;
+    const gm = 26 + bhMassVal * 2.4;
+    const pullRadius = 22 + bhMassVal * 2.1;
+
+    // Dynamically pull in any nearby planet that enters the drifting Black Hole's sphere of influence
+    if (objects) {
+      for (const [id, entry] of objects.entries()) {
+        if (id === 'sun') continue;
+        if (capturedBodies.some(c => c.id === id)) continue;
+        const wPos = entry.mesh.getWorldPosition(tmpVec);
+        if (wPos.distanceTo(bhPos) < pullRadius) {
+          capturePlanet(id, entry, gm, earthWillShatter);
+        }
+      }
+    }
+
+    const subSteps = 4;
+    const h = dt / subSteps;
 
     for (const item of capturedBodies) {
       if (item.swallowed) continue;
 
-      tmpDir.copy(bhPos).sub(item.pos);
-      const dist = tmpDir.length();
-      const invDist = 1 / Math.max(dist, 0.001);
-      tmpDir.multiplyScalar(invDist);
+      let dist = 10;
+      for (let step = 0; step < subSteps; step++) {
+        tmpDir.copy(bhPos).sub(item.pos);
+        dist = tmpDir.length();
+        const invDist = 1 / Math.max(dist, 0.001);
+        tmpDir.multiplyScalar(invDist);
 
-      // Gravitational pull + orbital decay drag to create dramatic tightening spirals
-      const accel = gm / (dist * dist + 1.4);
-      item.vel.addScaledVector(tmpDir, accel * dt);
+        // Softened Newtonian pull for smooth Keplerian curves
+        const accel = gm / (dist * dist + 1.15);
+        item.vel.addScaledVector(tmpDir, accel * h);
 
-      // If Earth is in non-shatter mode, keep it in a dramatic perturbed tidal orbit rather than swallowing
-      if (item.lockedToSafeOrbit && dist < tidalRadius * 0.78) {
-        const radialVel = item.vel.dot(tmpDir);
-        if (radialVel > 0) item.vel.addScaledVector(tmpDir, -radialVel * 1.4);
-      } else {
-        // Gentle orbital decay so spiral curves inevitably tighten into the singularity
-        const drag = dist < tidalRadius ? 0.975 : 0.992;
-        item.vel.multiplyScalar(Math.pow(drag, dt * 60));
+        if (item.lockedToSafeOrbit) {
+          // Keep Earth in an exhilarating perturbed 3D Keplerian tidal orbit without swallowing
+          const safeR = tidalRadius * 0.84;
+          const radialVel = item.vel.dot(tmpDir);
+          if (dist < safeR) {
+            const cushion = (safeR - dist) * 6.5;
+            item.vel.addScaledVector(tmpDir, -cushion * h);
+            if (radialVel > 0) item.vel.addScaledVector(tmpDir, -radialVel * 3.2 * h);
+          } else if (dist > safeR * 2.1) {
+            item.vel.addScaledVector(tmpDir, (dist - safeR * 2.1) * 0.8 * h);
+          }
+          // Gently steer speed toward local Keplerian velocity so orbit stays graceful
+          const targetV = Math.sqrt(gm / Math.max(dist, safeR * 0.8));
+          const speedNow = item.vel.length();
+          if (speedNow > 0.01) {
+            const blend = 1 + clamp01(h * 1.4) * (targetV / speedNow - 1);
+            item.vel.multiplyScalar(blend);
+          }
+        } else {
+          // Subtle frame-dragging swirl near the ergosphere + smooth orbital decay
+          if (dist < tidalRadius * 1.35) {
+            tmpVec.set(-tmpDir.z, 0.08 * tmpDir.y, tmpDir.x).normalize();
+            item.vel.addScaledVector(tmpVec, (gm * 0.045 / (dist + 0.8)) * h);
+          }
+          const drag = dist < tidalRadius ? 0.982 : 0.994;
+          item.vel.multiplyScalar(Math.pow(drag, h * 60));
+        }
+
+        item.pos.addScaledVector(item.vel, h);
       }
 
-      item.pos.addScaledVector(item.vel, dt);
       item.mesh.position.copy(item.pos);
+
+      // Recompute final radial vector for tidal alignment
+      tmpDir.copy(bhPos).sub(item.pos);
+      dist = tmpDir.length();
+      tmpDir.multiplyScalar(1 / Math.max(dist, 0.001));
 
       // Tidal stretching (Spaghettification!) as body enters tidal radius
       const prox = clamp01(1 - (dist - ehRadius) / Math.max(0.5, tidalRadius - ehRadius));
       if (prox > 0.02) {
-        const stretch = 1 + Math.pow(prox, 1.8) * (item.lockedToSafeOrbit ? 0.55 : 4.6);
+        const stretch = 1 + Math.pow(prox, 1.75) * (item.lockedToSafeOrbit ? 0.65 : 4.9);
         const squeeze = 1 / Math.sqrt(stretch);
         // Orient local +Z along tidal vector toward the Black Hole, then stretch Z and squeeze X/Y
         item.mesh.quaternion.setFromUnitVectors(zAxis, tmpDir);
@@ -767,20 +1153,34 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         );
         // Tidal heating glow as matter is ripped apart
         if (item.mesh.material?.emissive) {
-          item.mesh.material.emissive.setRGB(1.0 * prox, 0.42 * prox, 0.12 * prox);
-          item.mesh.material.emissiveIntensity = prox * 2.2;
+          item.mesh.material.emissive.setRGB(1.0 * prox, 0.42 * prox, 0.14 * prox);
+          item.mesh.material.emissiveIntensity = prox * 2.35;
+        }
+        // Shed glowing tidal sparks ripped toward the accretion disk
+        if (prox > 0.16 && Math.random() < prox * 0.65) {
+          const sparkVel = item.vel.clone().multiplyScalar(0.55)
+            .addScaledVector(tmpDir, 1.8 + prox * 3.5)
+            .add(new THREE.Vector3((Math.random() - 0.5) * 1.4, (Math.random() - 0.5) * 1.1, (Math.random() - 0.5) * 1.4));
+          emitSpark(item.pos, sparkVel, prox > 0.6 ? 0xffb86b : (item.colorHex || 0x8be2ff), 0.75 + Math.random() * 0.55, true);
         }
       } else {
         item.mesh.scale.copy(item.baseScale);
       }
 
-      // Push glowing trail point
+      // Push glowing spiral trail point
       item.trail.push(item.pos, prox);
 
       // Swallowed at the Event Horizon!
       if (!item.lockedToSafeOrbit && dist <= ehRadius * 1.18) {
         item.swallowed = true;
         item.mesh.visible = false;
+        // Dramatic flare burst of accretion sparks on swallow
+        const burstN = item.isEarth ? 36 : 16;
+        for (let k = 0; k < burstN; k++) {
+          const ang = (k / burstN) * Math.PI * 2;
+          const bVel = new THREE.Vector3(Math.cos(ang) * 4.2, (Math.random() - 0.5) * 2.4, Math.sin(ang) * 4.2);
+          emitSpark(item.pos, bVel, k % 2 ? 0xffd28a : (item.colorHex || 0xff7b42), 0.9 + Math.random() * 0.6, true);
+        }
         addShake(item.isEarth ? 0.95 : 0.28, item.isEarth ? 1.4 : 0.5);
         pulseBloom(item.isEarth ? 2.4 : 1.45);
         if (item.isEarth && !earthSwallowed) {
@@ -804,9 +1204,100 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       rock.scale.setScalar(kind === 'needle' ? 0.065 : kind === 'moon' ? earth.body.size * 0.6 : Math.max(0.2, r.damage * 0.9));
       rock.material.color.setHex(kind === 'needle' ? 0xb5dbea : kind === 'moon' ? 0xb4b1a6 : 0x91867b);
     },
+    launchStorm(count = 9, onStrike, onComplete, intensity = 0.55) {
+      clearStorm();
+      sphere.getWorldPosition(center);
+      const total = Math.max(1, Math.min(24, Math.round(Number(count) || 9)));
+      const clampedInt = clamp01(Number.isFinite(intensity) ? intensity : 0.55);
+
+      const camDir = camera.position.clone().sub(center).normalize();
+      const right = new THREE.Vector3().crossVectors(upVec, camDir);
+      if (right.lengthSq() < 0.001) right.set(1, 0, 0);
+      right.normalize();
+      const camUp = new THREE.Vector3().crossVectors(camDir, right).normalize();
+
+      const meteors = [];
+      for (let i = 0; i < total; i++) {
+        // Golden-angle distribution across 3D directions biased toward visible hemisphere
+        const phi = i * 2.39996 + Math.random() * 0.45;
+        const spread = 0.28 + Math.random() * 0.92;
+        const dir = camDir.clone()
+          .multiplyScalar(0.65 + Math.random() * 0.55)
+          .addScaledVector(right, Math.cos(phi) * spread)
+          .addScaledVector(camUp, Math.sin(phi) * spread)
+          .normalize();
+
+        const tangent = new THREE.Vector3().crossVectors(dir, upVec);
+        if (tangent.lengthSq() < 0.001) tangent.set(1, 0, 0);
+        tangent.normalize();
+
+        const size = 0.10 + clampedInt * 0.13 + Math.random() * 0.05;
+        const mMesh = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(size, 1),
+          new THREE.MeshStandardMaterial({
+            color: 0xffd1a3,
+            emissive: 0xff6b1c,
+            emissiveIntensity: 1.6,
+            roughness: 0.6
+          })
+        );
+        mMesh.visible = false;
+
+        const mTail = new THREE.Mesh(
+          new THREE.ConeGeometry(size * 1.15, 2.1 + clampedInt * 1.2, 12, 1, true),
+          new THREE.MeshBasicMaterial({
+            color: 0xffa64d,
+            transparent: true,
+            opacity: 0.72,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
+          })
+        );
+        mTail.visible = false;
+        stormGroup.add(mMesh, mTail);
+
+        const trail = createTrailRibbon(i % 2 ? 0xff9b42 : 0xffd27d, 26);
+        trailGroup.add(trail.line, trail.sparks);
+
+        const baseDelay = total > 1 ? (i / (total - 1)) * 3.05 : 0;
+        const jitter = total > 1 ? (Math.random() - 0.5) * 0.18 : 0;
+        meteors.push({
+          dir,
+          tangent,
+          startDist: 10.5 + Math.random() * 4.5,
+          arcAmp: (i % 2 ? 1 : -1) * (1.2 + Math.random() * 1.4),
+          delay: Math.max(0, baseDelay + jitter),
+          duration: 0.76 + Math.random() * 0.26,
+          flightTime: 0,
+          launched: false,
+          hit: false,
+          mesh: mMesh,
+          tail: mTail,
+          trail
+        });
+      }
+
+      storm = {
+        meteors,
+        elapsed: 0,
+        struck: 0,
+        total,
+        intensity: clampedInt,
+        onStrike,
+        onComplete
+      };
+    },
+    getCraterCount() {
+      return scarRoot.children.length;
+    },
     reset() {
       flight = null;
+      clearStorm();
+      clearPulses();
+      clearSparks();
       result = null;
+      age = 0;
       totalHeat = 0;
       heat.material.opacity = 0;
       sphere.visible = true;
@@ -818,8 +1309,12 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       flashSphere.visible = false;
       bhActive = false;
       bhAge = 0;
+      bhDriftPhase = 0;
+      earthWillShatter = false;
+      earthSwallowed = false;
       bhGroup.visible = false;
       bhLight.intensity = 0;
+      jetMat.opacity = 0;
       spacetimeGrid.visible = false;
       gridMat.uniforms.uOpacity.value = 0;
       gridMat.uniforms.uWellDepth.value = 0;
@@ -839,6 +1334,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       bhActive = true;
       bhMassVal = massMultiplier;
       bhAge = 0;
+      bhDriftPhase = 0;
       earthWillShatter = shatter;
       earthSwallowed = false;
       bhScale = Math.max(0.65, Math.min(2.35, 0.55 + massMultiplier * 0.036));
@@ -904,6 +1400,12 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         }
       }
 
+      if (dt > 0) {
+        updateStorm(dt);
+        updatePulses(dt);
+        updateSparks(dt);
+      }
+
       if (flashTime > 0) {
         flashTime = Math.max(0, flashTime - dt);
         const p = 1 - flashTime / 0.85;
@@ -917,6 +1419,30 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         const easeIn = clamp01(bhAge / 1.15);
         const smoothScale = bhScale * (1 - Math.pow(1 - easeIn, 3));
         bhGroup.scale.setScalar(Math.max(0.05, smoothScale));
+
+        // Gentle orbital-plane drift of the Black Hole while perturbing nearby planets & moons
+        if (dt > 0) {
+          bhDriftPhase += dt * (0.26 + Math.min(0.24, bhMassVal * 0.0055));
+          const driftR = 1.85 + Math.min(2.6, bhMassVal * 0.055);
+          const driftRamp = clamp01(bhAge / 2.0);
+          bhPos.set(
+            bhOrigin.x + Math.sin(bhDriftPhase) * driftR * driftRamp,
+            bhOrigin.y + Math.sin(bhDriftPhase * 1.65) * 0.52 * driftRamp,
+            bhOrigin.z + (Math.cos(bhDriftPhase * 0.85) - 1) * driftR * 0.85 * driftRamp
+          );
+          bhGroup.position.copy(bhPos);
+          spacetimeGrid.position.set(bhPos.x, bhPos.y - 2.2, bhPos.z);
+          if (earthSwallowed) debris.position.copy(bhPos);
+        }
+
+        // Subtle relativistic disk precession & polar jet pulsation
+        bhDisk.rotation.x = Math.PI * 0.41 + Math.sin(bhAge * 0.65) * 0.055;
+        bhDisk.rotation.y = 0.18 + Math.cos(bhAge * 0.48) * 0.075;
+        if (bhMassVal >= 14) {
+          const baseJet = Math.min(0.45, (bhMassVal - 12) * 0.015);
+          jetMat.opacity = baseJet * (0.82 + 0.18 * Math.sin(bhAge * 5.2)) * easeIn;
+        }
+        bhLight.intensity = (180 + bhMassVal * 14) * (0.92 + 0.08 * Math.sin(bhAge * 6.5)) * easeIn;
 
         bhAccretionMat.uniforms.uTime.value = bhAge;
         bhAccretionMat.uniforms.uIntensity.value = 1.0 + Math.sin(bhAge * 3.2) * 0.08;
@@ -971,10 +1497,10 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       }
     },
     get busy() {
-      return !!flight;
+      return !!(flight || storm);
     },
     get destroyed() {
-      return !!(result?.fragment || earthWillShatter);
+      return !!(result?.fragment || earthWillShatter || earthSwallowed);
     }
   };
 }
