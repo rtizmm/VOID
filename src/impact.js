@@ -898,15 +898,15 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     const isSun = id === 'sun';
     const toBh = tmpDir.copy(bhPos).sub(wPos);
     const dist = Math.max(1.8, toBh.length());
+    const dirNorm = toBh.clone().multiplyScalar(1 / dist);
     const vKepler = Math.sqrt(gm / dist);
     const tiltAxis = tmpVec2.set((Math.random() - 0.5) * 0.35, 1, (Math.random() - 0.5) * 0.35).normalize();
     const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
-    const speedRatio = isSun
-      ? (shatter ? 0.52 : 0.78)
-      : id === target.body.id
-        ? (shatter ? 0.72 : 0.96)
-        : 0.68 + Math.random() * 0.14;
-    const trail = createTrailRibbon(entry.body.color, isSun ? 96 : id === target.body.id ? 88 : 74);
+    // Immediate strong inward spiral kick so EVERY body visibly starts rushing toward the Black Hole right away!
+    const speedRatio = isSun ? 0.36 : 0.44 + Math.random() * 0.14;
+    const inwardKick = (2.4 + bhMassVal * 0.14) * (isSun ? 0.65 : 1.0);
+    const initVel = tang.multiplyScalar(vKepler * speedRatio).addScaledVector(dirNorm, inwardKick);
+    const trail = createTrailRibbon(entry.body.color, isSun ? 104 : 84);
     trailGroup.add(trail.line, trail.sparks);
 
     capturedIds.add(id);
@@ -915,7 +915,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       name: entry.body.name || id,
       mesh: entry.mesh,
       pos: wPos,
-      vel: tang.multiplyScalar(vKepler * speedRatio),
+      vel: initVel,
       baseScale: originalBodies.get(id).baseScale.clone(),
       trail,
       swallowed: false,
@@ -925,7 +925,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       isRogue: false,
       colorHex: entry.body.color,
       drain: 0,
-      lockedToSafeOrbit: (id === target.body.id || isSun) && !shatter
+      lockedToSafeOrbit: false
     });
   }
 
@@ -953,59 +953,50 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     const gm = 26 + massMultiplier * 2.4;
     const pullRadius = 22 + massMultiplier * 2.1;
 
-    // 1. Capture Earth's Moon when targeting Earth or within pullRadius (compatible with nested satellite groups)
+    // 1. IMMEDIATELY capture Earth's Moon regardless of distance
     if (moon) {
       const mPos = moon.getWorldPosition(new THREE.Vector3());
-      if (target.body.id === 'earth' || mPos.distanceTo(bhPos) < pullRadius) {
-        const isDirectSceneChild = moon.parent === scene;
-        moonOrigin = {
-          parent: moon.parent,
-          localPos: moon.position.clone(),
-          baseScale: isDirectSceneChild ? new THREE.Vector3(1, 1, 1) : moon.scale.clone(),
-          baseQuat: moon.quaternion.clone()
-        };
-        if (moon.parent && !isDirectSceneChild) {
-          scene.attach(moon);
-        }
-        const mBaseScale = isDirectSceneChild ? new THREE.Vector3(1, 1, 1) : moon.scale.clone();
-        const toBh = tmpDir.copy(bhPos).sub(mPos);
-        const mDist = Math.max(1.8, toBh.length());
-        const vKepler = Math.sqrt(gm / mDist);
-        const tiltAxis = tmpVec2.set(0.22, 1, -0.18).normalize();
-        const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
-        const trail = createTrailRibbon(0x9ce2ff, 80);
-        trailGroup.add(trail.line, trail.sparks);
-        capturedIds.add('moon');
-        capturedBodies.push({
-          id: 'moon',
-          mesh: moon,
-          pos: mPos,
-          vel: tang.multiplyScalar(vKepler * 0.84),
-          baseScale: mBaseScale,
-          trail,
-          swallowed: false,
-          isMoon: true,
-          isEarth: false,
-          isRogue: false,
-          colorHex: 0x9ce2ff
-        });
+      const isDirectSceneChild = moon.parent === scene;
+      moonOrigin = {
+        parent: moon.parent,
+        localPos: moon.position.clone(),
+        baseScale: isDirectSceneChild ? new THREE.Vector3(1, 1, 1) : moon.scale.clone(),
+        baseQuat: moon.quaternion.clone()
+      };
+      if (moon.parent && !isDirectSceneChild) {
+        scene.attach(moon);
       }
+      const mBaseScale = isDirectSceneChild ? new THREE.Vector3(1, 1, 1) : moon.scale.clone();
+      const toBh = tmpDir.copy(bhPos).sub(mPos);
+      const mDist = Math.max(1.8, toBh.length());
+      const vKepler = Math.sqrt(gm / mDist);
+      const tiltAxis = tmpVec2.set(0.22, 1, -0.18).normalize();
+      const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
+      const trail = createTrailRibbon(0x9ce2ff, 80);
+      trailGroup.add(trail.line, trail.sparks);
+      capturedIds.add('moon');
+      capturedBodies.push({
+        id: 'moon',
+        name: 'Ay',
+        mesh: moon,
+        pos: mPos,
+        vel: tang.multiplyScalar(vKepler * 0.55).addScaledVector(toBh.clone().normalize(), 2.2),
+        baseScale: mBaseScale,
+        trail,
+        swallowed: false,
+        isMoon: true,
+        isSun: false,
+        isEarth: false,
+        isRogue: false,
+        colorHex: 0x9ce2ff,
+        lockedToSafeOrbit: false
+      });
     }
 
-    // 2. Capture target, the Sun (at high mass or proximity!), & all nearby planets in the Solar System
+    // 2. IMMEDIATELY capture EVERY SINGLE BODY in the Solar System (Sun + all 8 planets!) on Frame 1!
     if (objects) {
       for (const [id, entry] of objects.entries()) {
-        const wPos = entry.mesh.getWorldPosition(tmpVec);
-        const dist = wPos.distanceTo(bhPos);
-        if (id === 'sun') {
-          if (id === target.body.id || massMultiplier >= 18 || dist < 28 + massMultiplier * 0.85) {
-            capturePlanet(id, entry, gm, shatter);
-          }
-          continue;
-        }
-        if (id === target.body.id || dist < pullRadius) {
-          capturePlanet(id, entry, gm, shatter);
-        }
+        capturePlanet(id, entry, gm, shatter);
       }
     }
 
@@ -1330,8 +1321,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
 
     const subSteps = 4;
     const h = dt / subSteps;
-    const innerDrag = Math.pow(0.976, h * 60);
-    const outerDrag = Math.pow(0.991 - Math.min(0.011, bhMassVal * 0.0002), h * 60);
+    const innerDrag = Math.pow(0.968, h * 60);
+    const outerDrag = Math.pow(0.980 - Math.min(0.012, bhMassVal * 0.00022), h * 60);
     let sunSiphonDrawn = false;
 
     for (const item of capturedBodies) {
@@ -1344,36 +1335,17 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         const invDist = 1 / Math.max(dist, 0.001);
         tmpDir.multiplyScalar(invDist);
 
-        // Softened Newtonian pull + long-range system pull so outer planets & the Sun visibly spiral in!
-        const longRange = (gm * (item.isSun ? 0.022 : 0.036)) / (dist + 4.5);
-        const accel = (gm / (dist * dist + 1.15)) * (item.isSun ? 0.65 : 1.0) + longRange;
+        // Relentless universal Black Hole pull: near + strong far-field attraction so the ENTIRE Solar System collapses in!
+        const farPull = (4.8 + bhMassVal * 0.30) * (item.isSun ? 0.72 : 1.0) * (0.45 + 0.55 / (1 + dist * 0.015));
+        const accel = (gm / (dist * dist + 1.15)) * (item.isSun ? 0.72 : 1.0) + farPull;
         item.vel.addScaledVector(tmpDir, accel * h);
 
-        if (item.lockedToSafeOrbit) {
-          // Keep non-shatter body in a dramatic perturbed 3D Keplerian tidal orbit without swallowing
-          const safeR = item.isSun ? Math.max(tidalRadius * 1.45, 9.5) : tidalRadius * 0.84;
-          const radialVel = item.vel.dot(tmpDir);
-          if (dist < safeR) {
-            const cushion = (safeR - dist) * 6.5;
-            item.vel.addScaledVector(tmpDir, -cushion * h);
-            if (radialVel > 0) item.vel.addScaledVector(tmpDir, -radialVel * 3.2 * h);
-          } else if (dist > safeR * 2.2) {
-            item.vel.addScaledVector(tmpDir, (dist - safeR * 2.2) * 0.8 * h);
-          }
-          const targetV = Math.sqrt(gm / Math.max(dist, safeR * 0.8));
-          const speedNow = item.vel.length();
-          if (speedNow > 0.01) {
-            const blend = 1 + clamp01(h * 1.4) * (targetV / speedNow - 1);
-            item.vel.multiplyScalar(blend);
-          }
-        } else {
-          // Subtle frame-dragging swirl near the ergosphere + smooth orbital decay
-          if (dist < tidalRadius * 1.45) {
-            tmpVec.set(-tmpDir.z, 0.08 * tmpDir.y, tmpDir.x).normalize();
-            item.vel.addScaledVector(tmpVec, (gm * 0.045 / (dist + 0.8)) * h);
-          }
-          item.vel.multiplyScalar(dist < tidalRadius ? innerDrag : outerDrag);
+        // Subtle frame-dragging swirl near the ergosphere + strong inward orbital decay
+        if (dist < tidalRadius * 1.6) {
+          tmpVec.set(-tmpDir.z, 0.08 * tmpDir.y, tmpDir.x).normalize();
+          item.vel.addScaledVector(tmpVec, (gm * 0.04 / (dist + 0.8)) * h);
         }
+        item.vel.multiplyScalar(dist < tidalRadius ? innerDrag : outerDrag);
 
         item.pos.addScaledVector(item.vel, h);
       }
@@ -1711,6 +1683,9 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     },
     isSunSwallowed() {
       return sunSwallowed;
+    },
+    getBlackHolePosition(out) {
+      return out.copy(bhPos);
     },
     get isBlackHoleActive() {
       return bhActive;

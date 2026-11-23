@@ -1206,6 +1206,7 @@ export function createSimulator({
     isSunGone: () => (sunAge !== null && sunAge >= 500) || effects.isSunSwallowed(),
     isBodyCaptured: id => effects.isBodyCaptured(id),
     isBlackHoleActive: () => effects.isBlackHoleActive,
+    getBlackHolePosition: out => effects.getBlackHolePosition(out),
     update(dt) {
       const safeDt = clampFinite(dt, 0, 0.25, 0);
       effects.update(safeDt);
