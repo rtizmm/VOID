@@ -20,6 +20,17 @@ const cases = [
 const range = (label, id, min, max, step, value, unit) =>
   `<div class="sim-row"><div class="sim-row-head"><label for="${id}">${label}</label><output id="${id}-value">${fmt(value)} ${unit}</output></div><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></div>`;
 
+const PLANET_PROFILES = {
+  mercury: { name: 'Merkür', temp: 167, atmo: 0, vel: 47.4, pop: 0 },
+  venus: { name: 'Venüs', temp: 464, atmo: 100, vel: 35.0, pop: 0 },
+  earth: { name: 'Dünya', temp: 15, atmo: 100, vel: 29.8, pop: 8.5e9 },
+  mars: { name: 'Mars', temp: -65, atmo: 12, vel: 24.1, pop: 1.2e6 },
+  jupiter: { name: 'Jüpiter', temp: -110, atmo: 100, vel: 13.1, pop: 0 },
+  saturn: { name: 'Satürn', temp: -140, atmo: 100, vel: 9.7, pop: 0 },
+  uranus: { name: 'Uranüs', temp: -195, atmo: 100, vel: 6.8, pop: 0 },
+  neptune: { name: 'Neptün', temp: -200, atmo: 100, vel: 5.4, pop: 0 }
+};
+
 export function createSimulator({
   scene,
   camera,
@@ -39,6 +50,9 @@ export function createSimulator({
 }) {
   const earth = objects.get('earth');
   const sun = objects.get('sun');
+  let targetId = 'earth';
+  const currentTarget = () => objects.get(targetId) || earth;
+  const targetProfile = () => PLANET_PROFILES[targetId] || PLANET_PROFILES.earth;
   const effects = createImpactEffects(scene, earth, camera, { objects, moon, addShake, pulseBloom });
   const original = { ambient: ambient.intensity, light: light.intensity, fill: sunFill.intensity };
 
@@ -65,9 +79,10 @@ export function createSimulator({
   let environment = null;
   let appliedSunFraction = 0;
   let title = 'Dünya dengede';
-  let description = 'Bir deney başlat. Değişiklikler dünyayı sıfırlayana kadar kalır.';
+  let description = 'Bir deney başlat. Değişiklikler sıfırlayana kadar kalır.';
   let tick = 0;
   let telTick = 0;
+  let habTick = 0;
   let bhTelPhase = 0;
 
   // Live telemetry state
@@ -116,14 +131,25 @@ export function createSimulator({
   }
 
   function energy() {
-    return caseId === 'asteroid'
-      ? asteroidScenario(diameter, velocity)
-      : caseId === 'moon'
-        ? {
-            joules: 0.5 * 7.342e22 * (velocity * 1000) ** 2,
-            megatons: (0.5 * 7.342e22 * (velocity * 1000) ** 2) / 4.184e15
-          }
-        : relativisticScenario(massKind === 'needle' ? 0.001 : massKind === 'car' ? 1500 : 1e12, beta);
+    if (caseId === 'asteroid') return asteroidScenario(diameter, velocity);
+    if (caseId === 'moon') {
+      const j = 0.5 * 7.342e22 * (velocity * 1000) ** 2;
+      return { joules: j, megatons: j / 4.184e15 };
+    }
+    const massMap = { needle: 0.001, car: 1500, mountain: 1e12, neutron: 1e15, antimatter: 1e9, tachyon: 1e6 };
+    const m = massMap[massKind] || 0.001;
+    // Sci-fi / physics-breaking boost for antimatter, tachyon, and superluminal (>= 100% c) speeds!
+    if (massKind === 'antimatter') {
+      const j = 2 * m * 299792458 ** 2 * Math.pow(Math.max(1, beta / 50), 2);
+      return { joules: j, megatons: j / 4.184e15 };
+    }
+    if (massKind === 'tachyon' || beta >= 100) {
+      const ftlFactor = Math.max(1.5, beta / 100);
+      const baseJ = relativisticScenario(m, 99.99).joules;
+      const j = baseJ * Math.pow(ftlFactor, 4.5) * (massKind === 'tachyon' ? 1e6 : 25);
+      return { joules: j, megatons: j / 4.184e15 };
+    }
+    return relativisticScenario(m, beta);
   }
 
   function preview() {
@@ -161,68 +187,74 @@ export function createSimulator({
       };
     });
 
-    let h = '';
+    let h = `<div class="sim-row"><div class="sim-row-head"><label for="target-planet">Hedef Gezegen</label><output>${targetProfile().name}</output></div><select id="target-planet" style="width:100%;background:#131b26;border:1px solid #ffffff26;border-radius:8px;padding:8px;color:#edf1f6">${Object.entries(PLANET_PROFILES)
+      .map(([id, p]) => `<option value="${id}" ${id === targetId ? 'selected' : ''}>${p.name}${p.pop > 0 ? '' : ' (Koloni / Yüzey)'}</option>`)
+      .join('')}</select></div>`;
     if (caseId === 'asteroid') {
-      h =
+      h +=
         range('Çap', 'diameter-range', 20, 20000, 10, diameter, 'm') +
         `<div class="sim-presets"><button data-size="50">50 m</button><button data-size="1000">1 km</button><button data-size="10000">10 km</button><button data-size="20000">20 km</button></div>` +
         range('Hız', 'velocity-range', 11, 70, 1, velocity, 'km/sn');
     }
     if (caseId === 'relativistic') {
-      h =
+      h +=
         `<div class="sim-presets">${[
           ['needle', 'İğne · 1 g'],
           ['car', 'Otomobil · 1,5 t'],
-          ['mountain', 'Dağ · 10¹² kg']
+          ['mountain', 'Everest · 10¹² kg'],
+          ['neutron', 'Nötron Parçası'],
+          ['antimatter', 'Antimadde'],
+          ['tachyon', 'Takyon · FTL']
         ]
           .map(([id, name]) => `<button class="sim-preset ${id === massKind ? 'active' : ''}" data-mass="${id}">${name}</button>`)
           .join('')}</div>` +
-        range('Işık hızının yüzdesi', 'rel-speed', 10, 99.99, 0.01, beta, '% c') +
-        `<div class="sim-presets"><button data-beta="90">%90</button><button data-beta="99">%99</button><button data-beta="99.99">%99,99</button></div><p class="sim-tip">Kütleli cisimler tam ışık hızına ulaşamaz. Hareket, izlenebilmesi için yavaşlatılır.</p>`;
+        range('Işık hızının yüzdesi', 'rel-speed', 10, 500, 1, beta, '% c') +
+        `<div class="sim-presets"><button data-beta="99">%99 c</button><button data-beta="99.99">%99,99</button><button data-beta="100">%100 c</button><button data-beta="250">%250 Takyon</button><button data-beta="500">%500 Yırtık</button></div><p class="sim-tip">Fizik sınırlarını aş: %100 c üzeri Takyon hızları, Antimadde ve Nötron yıldızı parçaları gezegeni delip geçer veya parçalar.</p>`;
     }
     if (caseId === 'moon') {
-      h =
+      h +=
         range('Ay’ın çarpışma hızı', 'velocity-range', 1, 100, 1, velocity, 'km/sn') +
-        '<p class="sim-tip">7,342 × 10²² kg. Ay’ı doğrudan Dünya’ya gönder. Yörünge ve gelgit etkileşimleri modellenmez.</p>';
+        `<p class="sim-tip">7,342 × 10²² kg. Ay’ı doğrudan ${targetProfile().name} üzerine gönder.</p>`;
     }
     if (caseId === 'sun') {
-      h =
-        '<p class="sim-tip">Işık kaybı yaklaşık 8 dk 20 sn sonra Dünya’ya ulaşır. Zamanı seçerek ilerle.</p><div class="sim-presets"><button data-day="0">Şimdi</button><button data-day="500">8 dk 20 sn</button><button data-day="86400">1 gün</button><button data-day="604800">1 hafta</button><button data-day="2592000">1 ay</button></div><p class="sim-tip">Oyun kaybı: ilk gün %0; 1–30 gün arası günde +%3, en çok %95. Korunak ayarı azaltır. Fiziksel sağkalım tahmini değildir.</p>';
+      h +=
+        '<p class="sim-tip">Işık kaybı yaklaşık 8 dk 20 sn sonra ulaşır. Zamanı seçerek ilerle.</p><div class="sim-presets"><button data-day="0">Şimdi</button><button data-day="500">8 dk 20 sn</button><button data-day="86400">1 gün</button><button data-day="604800">1 hafta</button><button data-day="2592000">1 ay</button></div><p class="sim-tip">Soğuma derinleştikçe yüzey donar ve korunaksız nüfus hızla tükenir.</p>';
     }
     if (caseId === 'gravity') {
-      h =
+      h +=
         range('Yüzey yerçekimi', 'gravity-range', 0, 700, 10, gravity, '%') +
-        '<p class="sim-tip">24 saatlik kurgusal etki. Oyun kaybı = |g/100 − 1| × %12, en çok %95; korunak ve maruziyetle değişir. Yörünge değişmez.</p>';
+        '<p class="sim-tip">24 saatlik kurgusal etki. Yüksek veya sıfır yerçekimi yapıları ve atmosfer dengesini bozar.</p>';
     }
     if (caseId === 'giant') {
-      h =
+      h +=
         range('Güneş boyutu', 'solar-size', 1, 25, 1, solarSize, '×') +
-        '<p class="sim-tip">Görsel boyut artırma deneyi; gerçek yıldız evrimi değildir. Oyun kaybı her ek boyut biriminde +%4,5; en çok %100.</p>';
+        '<p class="sim-tip">Güneş büyüdükçe yüzey sıcaklığı hızla fırlar, okyanuslar buharlaşır ve atmosfer yanar.</p>';
     }
     if (caseId === 'blackhole') {
-      h =
+      h +=
         range('Kara delik kütlesi', 'bh-mass', 1, 50, 1, bhMass, 'M⊕') +
-        '<div class="sim-presets"><button data-bh="3">3 M⊕ · Yakın geçiş</button><button data-bh="15">15 M⊕ · Gelgit</button><button data-bh="40">40 M⊕ · Yutulma</button></div><p class="sim-tip">Dünya yakınında mikro kara delik ve yığılma diski. 35 M⊕ ve üzerinde gezegen parçalanır.</p>';
+        '<div class="sim-presets"><button data-bh="3">3 M⊕ · Yakın geçiş</button><button data-bh="15">15 M⊕ · Gelgit</button><button data-bh="40">40 M⊕ · Yutulma</button></div><p class="sim-tip">Hedef gezegen yakınında kara delik ve yığılma diski. 35 M⊕ ve üzerinde gezegen parçalanır.</p>';
     }
     if (caseId === 'grb') {
-      h =
+      h +=
         range('Patlama uzaklığı', 'grb-dist', 100, 6000, 100, grbDist, 'ışık yılı') +
         range('Gezegen kalkanı', 'shield-range', 0, 100, 5, shieldPct, '%') +
         '<p class="sim-tip">Gama ışını patlaması (GRB) demeti ve deneysel gezegen kalkanı. Kalkan ışınımı ve atmosfer ısınmasını sönümler.</p>';
     }
     if (caseId === 'storm') {
-      h =
+      h +=
         range('Meteor sayısı', 'storm-count', 4, 15, 1, stormCount, 'meteor') +
         range('Yağmur yoğunluğu', 'storm-intensity', 20, 100, 5, stormIntensity, '%') +
-        '<div class="sim-presets"><button data-storm="5,35">5 · Hafif</button><button data-storm="9,65">9 · Yoğun</button><button data-storm="15,95">15 · Kıyamet</button></div><p class="sim-tip">Farklı 3B yönlerden ardışık meteor bombardımanı. Her darbe yeni krater, plazma parlaması ve şok dalgası oluşturur.</p>';
+        '<div class="sim-presets"><button data-storm="5,35">5 · Hafif</button><button data-storm="9,65">9 · Yoğun</button><button data-storm="15,95">15 · Kıyamet</button></div><p class="sim-tip">Farklı 3B yönlerden ardışık meteor bombardımanı. Artan sıcaklık ve atmosfer kaybı yaşamı tamamen bitirebilir.</p>';
     }
 
     if (['asteroid', 'relativistic', 'moon'].includes(caseId)) {
       h += '<div class="energy-preview">ÇARPIŞMA ENERJİSİ<strong id="energy-number"></strong></div>';
     }
 
+    const pName = targetProfile().name;
     const runLabel = effects.destroyed
-      ? 'Dünya yok · önce sıfırla'
+      ? `${pName} yok · önce sıfırla`
       : effects.busy
         ? caseId === 'storm'
           ? 'Meteor yağmuru sürüyor…'
@@ -241,12 +273,32 @@ export function createSimulator({
                   ? 'Gama patlamasını ateşle ⚡'
                   : caseId === 'storm'
                     ? 'Meteor yağmurunu başlat ☄'
-                    : 'Çarpışmayı başlat ↗';
+                    : 'Atışı başlat ↗';
 
-    h += `<button class="sim-main-btn" id="run-case" ${effects.busy || effects.destroyed ? 'disabled' : ''}>${runLabel}</button><div class="sim-action-row"><button class="sim-reset" id="random-case" ${effects.busy || effects.destroyed ? 'disabled' : ''}>⚡ Rastgele felaket</button><button class="sim-reset" id="reset-case">↺ Dünyayı sıfırla</button></div>`;
+    h += `<button class="sim-main-btn" id="run-case" ${effects.busy || effects.destroyed ? 'disabled' : ''}>${runLabel}</button><div class="sim-action-row"><button class="sim-reset" id="random-case" ${effects.busy || effects.destroyed ? 'disabled' : ''}>⚡ Rastgele felaket</button><button class="sim-reset" id="reset-case">↺ ${pName} sıfırla</button></div>`;
 
     const controlsEl = $('#lab-controls');
     if (controlsEl) controlsEl.innerHTML = h;
+    if ($('#target-planet')) {
+      $('#target-planet').onchange = e => {
+        if (effects.busy) return;
+        targetId = e.target.value;
+        const entry = currentTarget();
+        const prof = targetProfile();
+        effects.setTarget(entry);
+        initial = targetId === 'earth' ? Math.round(Math.max(0, Math.min(20, Number($('#population')?.value) || 8.5)) * 1e9) : prof.pop;
+        survivors = initial;
+        telTemp = prof.temp;
+        telAtmo = prof.atmo;
+        telVel = prof.vel;
+        title = `${prof.name} hedef alındı`;
+        description = prof.pop > 0 ? `${prof.name} üzerinde deney kurmaya hazırsın.` : `${prof.name} üzerinde yüzey/yörünge deneyi hazır.`;
+        select(targetId);
+        stats();
+        render();
+        notify(`HEDEF: ${prof.name.toUpperCase()}`);
+      };
+    }
     if ($('#run-case')) $('#run-case').onclick = run;
     if ($('#reset-case')) $('#reset-case').onclick = reset;
     if ($('#random-case')) {
@@ -395,7 +447,9 @@ export function createSimulator({
 
   function run() {
     if (effects.busy || effects.destroyed) return;
-    select('earth');
+    const tgt = currentTarget();
+    const prof = targetProfile();
+    select(targetId);
     if (innerWidth <= 760) setPanel(false);
 
     if (caseId === 'sun') {
@@ -415,13 +469,13 @@ export function createSimulator({
       environment = { kind: 'gravity', value: gravity, age: 0 };
       const g = gravityScenario(gravity);
       title = g.level;
-      description = fmt(g.acceleration) + ' m/s² · 24 saatlik oyun sonucu. Yapıların ve insanların gerçek tepkisi modellenmez.';
-      telVel = gravity === 0 ? 0 : Math.max(0, 29.8 * Math.sqrt(gravity / 100));
-      telAtmo = gravity === 0 ? 12 : Math.max(20, Math.min(100, 100 - Math.abs(gravity - 100) * 0.12));
-      telTemp = 15 + Math.round((gravity - 100) * 0.08);
-      applyFraction(Math.min(0.95, Math.abs(gravity / 100 - 1) * 0.12));
-      banner('Yerçekimi %' + gravity + ' · temsili uydu/parçacık hareketi');
-      logEvent('Yerçekimi %' + gravity, title);
+      description = fmt(g.acceleration) + ' m/s² · ' + prof.name + ' üzerinde 24 saatlik yerçekimi etkisi.';
+      telVel = gravity === 0 ? 0 : Math.max(0, prof.vel * Math.sqrt(gravity / 100));
+      telAtmo = gravity === 0 ? 0 : Math.max(0, Math.min(100, prof.atmo - Math.abs(gravity - 100) * 0.14));
+      telTemp = prof.temp + Math.round((gravity - 100) * 0.08);
+      applyFraction(Math.min(0.95, Math.abs(gravity / 100 - 1) * 0.14));
+      banner(`${prof.name} · Yerçekimi %${gravity}`);
+      logEvent(`${prof.name} · Yerçekimi %${gravity}`, title);
       render();
       return;
     }
@@ -431,15 +485,15 @@ export function createSimulator({
       environment = { kind: 'giant', value: solarSize, age: 0 };
       sun.mesh.scale.setScalar(sun.body.size * solarSize);
       light.intensity = original.light * Math.min(4, solarSize);
-      effects.setEnvironmentalHeat(Math.min(0.8, (solarSize - 1) * 0.045));
+      effects.setEnvironmentalHeat(Math.min(0.92, (solarSize - 1) * 0.055));
       if (addShake) addShake(0.12 + solarSize * 0.012, 0.9);
-      if (pulseBloom) pulseBloom(1.2 + solarSize * 0.04);
-      telTemp = Math.min(5800, 15 + (solarSize - 1) * 185);
-      telAtmo = Math.max(0, 100 - (solarSize - 1) * 4.4);
-      telVel = 29.8 + (solarSize - 1) * 0.6;
+      if (pulseBloom) pulseBloom(0.9 + solarSize * 0.03);
+      telTemp = Math.min(5800, prof.temp + (solarSize - 1) * 195);
+      telAtmo = Math.max(0, prof.atmo - (solarSize - 1) * 6.0);
+      telVel = prof.vel + (solarSize - 1) * 0.6;
       title = 'Güneş ' + solarSize + ' kat büyüdü';
-      description = 'Görsel deney. Nüfus kaybı seçilen boyuta bağlı oyun katsayısıdır.';
-      applyFraction(Math.min(1, (solarSize - 1) * 0.045));
+      description = 'Aşırı güneş radyasyonu yüzeyi kavuruyor ve atmosferi buharlaştırıyor.';
+      applyFraction(Math.min(1, (solarSize - 1) * 0.06));
       banner(title);
       logEvent('Dev Güneş ' + solarSize + '×', title);
       render();
@@ -451,28 +505,28 @@ export function createSimulator({
       bhTelPhase = 0;
       effects.spawnBlackHole(bhMass, shatter);
       playSfx?.('blackhole');
-      const ew = earth.mesh.getWorldPosition(camera.position.clone().set(0, 0, 0));
-      const camDir = camera.position.clone().sub(ew).normalize();
+      const tw = tgt.mesh.getWorldPosition(camera.position.clone().set(0, 0, 0));
+      const camDir = camera.position.clone().sub(tw).normalize();
       const up = camera.position.clone().set(0, 1, 0);
       const right = up.clone().cross(camDir).normalize();
-      const focusPt = ew.clone().addScaledVector(right, 3.1);
-      const widePos = focusPt.clone().addScaledVector(camDir, 19.5).addScaledVector(up, 7.8);
+      const focusPt = tw.clone().addScaledVector(right, 3.1 * Math.max(1, tgt.body.size * 0.8));
+      const widePos = focusPt.clone().addScaledVector(camDir, 19.5 * Math.max(1, tgt.body.size * 0.7)).addScaledVector(up, 7.8);
       if (flyTo) flyTo(widePos, focusPt, 1.35);
-      telTemp = Math.min(4800, Math.max(telTemp, 15) + bhMass * (shatter ? 65 : 28));
-      telAtmo = shatter ? 0 : Math.max(5, telAtmo - bhMass * 2.2);
-      telVel = shatter ? 148 + bhMass * 2.4 : 29.8 + bhMass * 2.1;
+      telTemp = Math.min(4800, Math.max(telTemp, prof.temp) + bhMass * (shatter ? 75 : 32));
+      telAtmo = shatter ? 0 : Math.max(0, telAtmo - bhMass * 2.8);
+      telVel = shatter ? 148 + bhMass * 2.4 : prof.vel + bhMass * 2.1;
       if (shatter) {
         survivors = 0;
         title = 'Olay Ufkunda Parçalanma';
-        description = bhMass + ' M⊕ kütleli kara delik gelgit kuvvetleriyle Dünya’yı esnetip yutuyor.';
+        description = `${bhMass} M⊕ kütleli kara delik gelgit kuvvetleriyle ${prof.name} gezegenini esnetip yutuyor.`;
       } else {
-        applyFraction(Math.min(0.92, bhMass * 0.026));
+        applyFraction(Math.min(0.95, bhMass * 0.03));
         title = 'Kara Delik Gelgit Etkisi';
-        description = bhMass + ' M⊕ kara delik uzay-zamanı büküyor · yakın cisimler spiral çizerek çekiliyor.';
+        description = `${bhMass} M⊕ kara delik ${prof.name} yakınında uzay-zamanı büküyor.`;
       }
-      banner('KARA DELİK · ' + bhMass + ' M⊕ · ' + title);
+      banner(`KARA DELİK · ${prof.name} · ${bhMass} M⊕`);
       stats();
-      logEvent('Kara Delik (' + bhMass + ' M⊕)', title);
+      logEvent(`Kara Delik (${prof.name})`, title);
       render();
       return;
     }
@@ -480,16 +534,16 @@ export function createSimulator({
     if (caseId === 'grb') {
       const rawSeverity = Math.max(0.04, Math.min(1, (6200 - grbDist) / 6000));
       const blocked = rawSeverity * (1 - (shieldPct / 100) * 0.85);
-      effects.fireGRB(shieldPct, blocked * 0.65);
+      effects.fireGRB(shieldPct, blocked * 0.7);
       playSfx?.('grb');
-      telTemp = Math.min(3500, Math.max(telTemp, 15) + Math.round(blocked * 920));
-      telAtmo = Math.max(0, telAtmo - blocked * 88);
-      applyFraction(blocked * 0.75);
+      telTemp = Math.min(3500, Math.max(telTemp, prof.temp) + Math.round(blocked * 950));
+      telAtmo = Math.max(0, telAtmo - blocked * 95);
+      applyFraction(blocked * 0.8);
       title = shieldPct >= 80 ? 'Kalkan Gama Darbesini Sönümledi' : 'Gama Işını Patlaması (GRB)';
-      description = grbDist + ' ışık yılı uzaklıktan gama demeti · Kalkan: %' + shieldPct + '. Atmosfer iyonlaşması oyun modeline göre uygulandı.';
-      banner('GRB · ' + grbDist + ' ly · Kalkan %' + shieldPct);
+      description = `${prof.name} · ${grbDist} ışık yılı uzaklıktan gama demeti · Kalkan: %${shieldPct}.`;
+      banner(`GRB · ${prof.name} · Kalkan %${shieldPct}`);
       stats();
-      logEvent('Gama Patlaması (' + grbDist + ' ly)', title);
+      logEvent(`GRB (${prof.name})`, title);
       render();
       return;
     }
@@ -499,27 +553,48 @@ export function createSimulator({
       const count = stormCount;
       const intenPct = stormIntensity;
       const inten = intenPct / 100;
-      title = 'Meteor Yağmuru Başladı';
-      description = count + ' meteor farklı 3B yönlerden Dünya’ya yaklaşıyor · Yoğunluk: %' + intenPct + '.';
+      title = `${prof.name} · Meteor Yağmuru`;
+      description = `${count} meteor farklı 3B yönlerden ${prof.name} yüzeyine yağıyor · Yoğunluk: %${intenPct}.`;
       stats();
-      banner('METEOR YAĞMURU · ' + count + ' cisim atmosfere giriyor');
+      banner(`METEOR YAĞMURU · ${prof.name} · ${count} cisim`);
       effects.launchStorm(
         count,
         (struck, total) => {
           playSfx?.('impact');
-          const stepLoss = Math.min(0.45, (0.014 + inten * 0.048) / Math.sqrt(Math.max(1, total * 0.45)));
-          telTemp = Math.min(4200, Math.max(telTemp, 15) + Math.round(9 + inten * 38));
-          telAtmo = Math.max(0, telAtmo - (1.8 + inten * 4.4));
-          title = 'Meteor Yağmuru · ' + struck + '/' + total;
-          description = 'Yoğunluk %' + intenPct + ' · Kraterler, plazma parlamaları ve şok dalgaları yüzeyi vuruyor.';
-          banner('METEOR YAĞMURU · ' + struck + '/' + total + ' çarpma');
-          applyFraction(stepLoss);
+          // Non-linear escalating thermal & atmospheric collapse instead of constant % division
+          const heatJump = Math.round((12 + inten * 55) * (0.75 + Math.random() * 0.55) * (1 + struck / total));
+          const atmoDrop = (2.5 + inten * 7.2) * (0.8 + Math.random() * 0.45);
+          telTemp = Math.min(4200, Math.max(telTemp, prof.temp) + heatJump);
+          telAtmo = Math.max(0, telAtmo - atmoDrop);
+
+          if (survivors > 0) {
+            const heatStress = Math.max(0, (telTemp - 75) / 280);
+            const atmoStress = Math.max(0, (30 - telAtmo) / 30);
+            const directLoss = Math.round(
+              initial * (0.015 + inten * 0.058) * (0.65 + Math.random() * 0.7) * exposure * (1 - (shelter / 100) * 0.6)
+            );
+            const envLoss = Math.round(survivors * Math.min(0.7, heatStress * 0.4 + atmoStress * 0.48));
+            survivors = Math.max(0, survivors - directLoss - envLoss);
+            if (telTemp >= 420 || (telAtmo <= 0 && telTemp >= 180)) survivors = 0;
+          }
+
+          title = survivors === 0 && initial > 0 ? 'Tam Yok Oluş · Yaşanmaz Gezegen' : `Meteor Yağmuru · ${struck}/${total}`;
+          description =
+            survivors === 0 && initial > 0
+              ? `Yüzey ${Math.round(telTemp)}°C'ye ulaştı ve atmosfer (%${Math.round(telAtmo)}) çöktü — yaşam tamamen sona erdi.`
+              : `Yoğunluk %${intenPct} · Sıcaklık hızla artıyor, atmosfer inceliyor.`;
+          banner(`METEOR YAĞMURU · ${struck}/${total} çarpma`);
+          stats();
         },
         () => {
-          title = 'Meteor Yağmuru Tamamlandı';
-          description = count + ' meteor (%' + intenPct + ' yoğunluk) yüzeye çarptı. Aktif krater: ' + effects.getCraterCount() + '.';
-          banner('METEOR YAĞMURU · ' + count + ' çarpma tamamlandı');
-          logEvent('Meteor Yağmuru', count + ' meteor · %' + intenPct + ' yoğunluk');
+          if (survivors > 0 && (telTemp >= 380 || telAtmo <= 2)) survivors = 0;
+          title = survivors === 0 && initial > 0 ? 'Tam Yok Oluş · Yaşanmaz Gezegen' : 'Meteor Yağmuru Tamamlandı';
+          description =
+            survivors === 0 && initial > 0
+              ? `${count} meteor sonrası yüzey (${Math.round(telTemp)}°C) ve atmosfer (%${Math.round(telAtmo)}) yaşamı imkânsız kıldı.`
+              : `${count} meteor (%${intenPct} yoğunluk) ${prof.name} yüzeyine çarptı. Aktif krater: ${effects.getCraterCount()}.`;
+          banner(`METEOR YAĞMURU · ${count} çarpma tamamlandı`);
+          logEvent(`Meteor (${prof.name})`, `${count} meteor · %${intenPct}`);
           stats();
           render();
         },
@@ -533,26 +608,40 @@ export function createSimulator({
     const e = energy();
     const r = sandboxImpact(e.joules, survivors, exposure, shelter);
     const kind = caseId === 'relativistic' ? massKind : caseId;
-    title = 'Cisim yaklaşıyor';
-    description = 'Çarpışma bekleniyor · ' + fmt(e.megatons) + ' Mt TNT. Seçtiğin değerler bu atış için sabitlendi.';
+    const ftl = caseId === 'relativistic' && (beta >= 100 || kind === 'tachyon' || kind === 'antimatter' || kind === 'neutron');
+    title = ftl ? 'Egzotik / Işık Ötesi Atış' : 'Cisim yaklaşıyor';
+    description = `${prof.name} hedefte · ${fmt(e.megatons)} Mt TNT.`;
     stats();
-    banner('01 / YAKLAŞMA · Çarpışma yavaşlatılmış gösteriliyor');
-    effects.launch(r, kind, () => {
-      playSfx?.('impact');
-      survivors = r.survivors;
-      telTemp = Math.min(5500, Math.max(telTemp, 15) + (r.fragment ? 3200 : Math.round(12 + Math.pow(r.damage, 2.2) * 1850)));
-      telAtmo = r.fragment ? 0 : Math.max(0, telAtmo - (4 + Math.pow(r.damage, 1.5) * 78));
-      if (r.fragment) telVel = 0;
-      title = r.level;
-      description =
-        fmt(e.megatons) +
-        ' Mt TNT · ' +
-        (r.fragment ? 'Dünya parçalandı. Yeni deney için sıfırla.' : 'Krater, sıcak yüzey ve enkaz kalıcı olarak sahneye işlendi.');
-      stats();
-      banner('02 / SONUÇ · ' + r.level + ' · görsel ölçek temsilidir');
-      logEvent(caseId.toUpperCase(), fmt(e.megatons) + ' Mt · ' + r.level);
-      render();
-    });
+    banner(ftl ? `01 / EGZOTİK ATIŞ · ${prof.name} · %${beta} c` : `01 / YAKLAŞMA · ${prof.name}`);
+    effects.launch(
+      r,
+      kind,
+      () => {
+        playSfx?.(ftl ? 'grb' : 'impact');
+        survivors = r.survivors;
+        telTemp = Math.min(5500, Math.max(telTemp, prof.temp) + (r.fragment ? 3200 : Math.round(18 + Math.pow(r.damage, 2.0) * 1950)));
+        telAtmo = r.fragment ? 0 : Math.max(0, telAtmo - (5 + Math.pow(r.damage, 1.4) * 85));
+        if (r.fragment) {
+          telVel = 0;
+          survivors = 0;
+        }
+        if (telTemp >= 420 || (telAtmo <= 0 && telTemp >= 180)) survivors = 0;
+        title = r.fragment ? `${prof.name} Parçalandı` : survivors === 0 && initial > 0 ? 'Tam Yok Oluş · Yaşanmaz Gezegen' : r.level;
+        description =
+          fmt(e.megatons) +
+          ' Mt TNT · ' +
+          (r.fragment
+            ? `${prof.name} tamamen parçalandı. Yeni deney için sıfırla.`
+            : ftl
+              ? `Egzotik atış ${prof.name} gezegenini delip geçti ve aşırı termal şok yarattı.`
+              : 'Magma çatlakları, krater ve enkaz sahneye işlendi.');
+        stats();
+        banner(`02 / SONUÇ · ${title}`);
+        logEvent(`${kind.toUpperCase()} (${prof.name})`, `${fmt(e.megatons)} Mt`);
+        render();
+      },
+      { ftl, beta }
+    );
     render();
   }
 
@@ -560,23 +649,24 @@ export function createSimulator({
     effects.reset();
     restoreEnvironment();
     playSfx?.('reset');
-    initial = Math.round(Math.max(0, Math.min(20, Number($('#population')?.value) || 0)) * 1e9);
+    const prof = targetProfile();
+    initial = targetId === 'earth' ? Math.round(Math.max(0, Math.min(20, Number($('#population')?.value) || 0)) * 1e9) : prof.pop;
     survivors = initial;
     exposure = Number($('#exposure')?.value) || 1;
     shelter = Number($('#shelter')?.value) || 0;
-    telTemp = 15;
-    telAtmo = 100;
-    telVel = 29.8;
+    telTemp = prof.temp;
+    telAtmo = prof.atmo;
+    telVel = prof.vel;
     bhTelPhase = 0;
-    title = 'Dünya dengede';
-    description = 'Yeni dünya hazır. Deney sonuçları sıfırlandı.';
+    title = `${prof.name} dengede`;
+    description = `Yeni ${prof.name} hazır. Deney sonuçları sıfırlandı.`;
     if ($('#event-banner')) $('#event-banner').hidden = true;
     history.length = 0;
     if ($('#sim-log')) $('#sim-log').innerHTML = '';
     stats();
     render();
-    select('earth');
-    notify('Dünya ve nüfus sıfırlandı');
+    select(targetId);
+    notify(`${prof.name.toUpperCase()} VE SİSTEM SIFIRLANDI`);
   }
 
   if ($('#shelter')) {
@@ -622,6 +712,42 @@ export function createSimulator({
       effects.update(dt);
       tick += dt;
       telTick += dt;
+      habTick += dt;
+      // Continuous habitability & extinction engine: uninhabitable planets cannot sustain life!
+      if (dt > 0 && habTick >= 0.25 && survivors > 0 && initial > 0) {
+        const hdt = habTick;
+        habTick = 0;
+        const lethalMolten = telTemp >= 350 || (telAtmo <= 2 && telTemp >= 150) || telTemp <= -190;
+        const severeUninhabitable = telAtmo <= 12 || telTemp >= 95 || telTemp <= -90;
+        if (lethalMolten) {
+          const drop = Math.max(Math.ceil(initial * 0.14), Math.round(survivors * Math.min(1, hdt * 1.45)));
+          survivors = Math.max(0, survivors - drop);
+          if (survivors < initial * 0.002) survivors = 0;
+          if (survivors === 0) {
+            title = 'Tam Yok Oluş · Yaşanmaz Gezegen';
+            description = `Yüzey sıcaklığı (${Math.round(telTemp)}°C) ve atmosfer (%${Math.round(telAtmo)}) tüm yaşamı bitirdi.`;
+            banner(`YOK OLUŞ · ${targetProfile().name} artık yaşanmaz`);
+          }
+          stats();
+        } else if (severeUninhabitable) {
+          const bunkerCap = Math.round(initial * (shelter / 100) * 0.65);
+          const exposed = Math.max(0, survivors - bunkerCap);
+          if (exposed > 0) {
+            const severity =
+              (telAtmo <= 12 ? (15 - telAtmo) / 15 : 0) +
+              (telTemp >= 95 ? (telTemp - 85) / 220 : 0) +
+              (telTemp <= -90 ? (-80 - telTemp) / 140 : 0);
+            const rate = Math.min(0.85, Math.max(0.08, severity * 0.42)) * hdt;
+            const loss = Math.max(Math.ceil(exposed * 0.06), Math.round(exposed * rate));
+            survivors = Math.max(bunkerCap, survivors - loss);
+            if (survivors === 0) {
+              title = 'Tam Yok Oluş · Yaşanmaz Gezegen';
+              description = `Atmosfer (%${Math.round(telAtmo)}) ve sıcaklık (${Math.round(telTemp)}°C) yaşam koşullarını yok etti.`;
+            }
+            stats();
+          }
+        }
+      }
       if (sunRunning) {
         sunAge = Math.min(2592000, sunAge + dt * 3600);
         if (sunAge >= 2592000) {

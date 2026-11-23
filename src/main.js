@@ -19,29 +19,29 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.65));
 renderer.setSize(innerWidth,innerHeight);
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=1.28;
+renderer.toneMappingExposure=1.02;
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x02040a);
 const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,3200);
 const controls=new OrbitControls(camera,canvas);
 controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=2;controls.maxDistance=1000;
 controls.maxPolarAngle=Math.PI*.96;
-const ambient=new THREE.AmbientLight(0x92b1dd,.22);scene.add(ambient);
-const light=new THREE.PointLight(0xffdeb0,2700,320,1.2);scene.add(light);
-const sunFill=new THREE.PointLight(0xffa34b,100,90);scene.add(sunFill);
+const ambient=new THREE.AmbientLight(0x92b1dd,.20);scene.add(ambient);
+const light=new THREE.PointLight(0xffdeb0,2100,320,1.25);scene.add(light);
+const sunFill=new THREE.PointLight(0xffa34b,75,90);scene.add(sunFill);
 
-// Post-processing Bloom pipeline (with graceful fallback)
-let composer=null,bloomPass=null,bloomBase=.68,bloomBoost=0;
+// Post-processing Bloom pipeline (crisp, non-fatiguing glow with graceful fallback)
+let composer=null,bloomPass=null,bloomBase=.22,bloomBoost=0;
 try {
   composer=new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene,camera));
-  bloomPass=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),bloomBase,.58,.64);
+  bloomPass=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),bloomBase,.32,.92);
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
 } catch {
   composer=null;bloomPass=null;
 }
-function pulseBloom(boost=1.4){bloomBoost=Math.max(bloomBoost,boost)}
+function pulseBloom(boost=1.0){bloomBoost=Math.min(.42,Math.max(bloomBoost,boost*.24))}
 
 // Layer 0: Multi-layer animated deep-space Nebula Sky Dome
 const nebulaMat=new THREE.ShaderMaterial({
@@ -161,10 +161,10 @@ function makeStarLayer(count,rMin,rMax,sizeMin,sizeMax,brightBoost){
   scene.add(pts);
   return {pts,mat};
 }
-const farStars=makeStarLayer(6400,260,1200,1.4,4.2,1.05);
-const brightStars=makeStarLayer(1400,190,820,2.8,7.4,1.55);
+const farStars=makeStarLayer(6400,260,1200,1.2,3.4,.85);
+const brightStars=makeStarLayer(1400,190,820,2.2,5.6,1.05);
 // Layer 3: Near-field drifting cosmic dust for 3D parallax depth
-const nearDust=makeStarLayer(700,20,160,1.2,3.1,0.52);
+const nearDust=makeStarLayer(700,20,160,1.0,2.6,.42);
 const starMaterial=farStars.mat;
 
 function texture(body){
@@ -289,21 +289,21 @@ function createSunShaderMaterial(){
         float flares=smoothstep(0.62,0.92,plasma*0.75+granules*0.45);
         float spots=1.0-smoothstep(0.16,0.32,plasma);
 
-        vec3 deepAmber=vec3(0.88,0.22,0.02);
-        vec3 solarOrange=vec3(1.38,0.64,0.10);
-        vec3 solarGold=vec3(1.75,1.18,0.42);
-        vec3 whiteHot=vec3(2.35,2.08,1.48);
+        vec3 deepAmber=vec3(0.75,0.20,0.02);
+        vec3 solarOrange=vec3(1.05,0.52,0.10);
+        vec3 solarGold=vec3(1.28,0.88,0.34);
+        vec3 whiteHot=vec3(1.55,1.36,0.95);
 
         vec3 col=mix(deepAmber,solarOrange,smoothstep(0.22,0.54,plasma));
         col=mix(col,solarGold,smoothstep(0.48,0.78,plasma*0.65+granules*0.5));
-        col=mix(col,whiteHot,flares*0.85);
+        col=mix(col,whiteHot,flares*0.75);
         col*=(1.0-spots*0.42);
 
         float ndotv=max(dot(normalize(vNormalDir),normalize(vViewDir)),0.0);
-        float rim=pow(1.0-ndotv,2.35);
-        float innerCorona=pow(1.0-ndotv,4.5);
-        col+=vec3(1.85,0.78,0.18)*rim*(0.95+0.35*granules);
-        col+=vec3(2.4,1.75,0.95)*innerCorona*0.9;
+        float rim=pow(1.0-ndotv,2.6);
+        float innerCorona=pow(1.0-ndotv,4.8);
+        col+=vec3(1.15,0.52,0.14)*rim*(0.75+0.25*granules);
+        col+=vec3(1.45,1.08,0.58)*innerCorona*0.65;
 
         gl_FragColor=vec4(col,1.0);
       }
@@ -352,8 +352,8 @@ for(const body of bodies){
   }
   if(body.id==='uranus')mesh.rotation.z=1.65;
   if(body.id==='sun'){
-    const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexture(),color:0xffb25e,transparent:true,opacity:.74,blending:THREE.AdditiveBlending,depthWrite:false}));
-    glow.scale.set(23,23,1);mesh.add(glow);
+    const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexture(),color:0xffa84c,transparent:true,opacity:.32,blending:THREE.AdditiveBlending,depthWrite:false}));
+    glow.scale.set(13.5,13.5,1);mesh.add(glow);
   }
 }
 const earthEntry=objects.get('earth');
@@ -427,7 +427,7 @@ const asteroidGeo=new THREE.DodecahedronGeometry(1,0);
   }
   asteroidGeo.computeVertexNormals();
 }
-const asteroidMat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.92,metalness:.08});
+const asteroidMat=new THREE.MeshStandardMaterial({color:0x4a4540,roughness:.98,metalness:0});
 const asteroidBeltGroup=new THREE.Group();
 asteroidBeltGroup.rotation.x=.026;
 scene.add(asteroidBeltGroup);
@@ -457,7 +457,7 @@ for(let i=0;i<ASTEROID_COUNT;i++){
   astDummy.scale.set(astSx[i],astSy[i],astSz[i]);
   astDummy.updateMatrix();
   asteroidMesh.setMatrixAt(i,astDummy.matrix);
-  const c=astPalette[Math.floor(rand()*astPalette.length)].clone().multiplyScalar(.75+rand()*.45);
+  const c=astPalette[Math.floor(rand()*astPalette.length)].clone().multiplyScalar(.38+rand()*.24);
   asteroidMesh.setColorAt(i,c);
 }
 asteroidMesh.instanceMatrix.needsUpdate=true;
@@ -573,7 +573,7 @@ $('#quality').onclick=()=>{
   nearDust.mat.uniforms.uOpacity.value=quality==='HIGH'?.7:.25;
   kuiperMat.uniforms.uOpacity.value=quality==='HIGH'?.78:.35;
   kuiperMat.uniforms.uPr.value=pr;
-  bloomBase=quality==='HIGH'?.68:.32;
+  bloomBase=quality==='HIGH'?.22:.10;
   $('#quality').textContent='GRAFİK: '+(quality==='HIGH'?'YÜKSEK':'DÜŞÜK');
 };
 const toggleOrbitsBtn=$('#toggle-orbits');

@@ -306,19 +306,127 @@ function clamp01(v) {
   return Math.max(0, Math.min(1, v));
 }
 
+function createMagmaHeatMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uHeat: { value: 0 },
+      uTime: { value: 0 }
+    },
+    vertexShader: `
+      varying vec3 vObjPos;
+      varying vec3 vNormalDir;
+      varying vec3 vViewDir;
+      void main(){
+        vObjPos = normalize(position);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNormalDir = normalize(normalMatrix * normal);
+        vViewDir = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform float uHeat;
+      uniform float uTime;
+      varying vec3 vObjPos;
+      varying vec3 vNormalDir;
+      varying vec3 vViewDir;
+      ${NOISE_GLSL}
+      void main(){
+        if(uHeat <= 0.005) discard;
+        vec2 uv = vec2(atan(vObjPos.z, vObjPos.x) * 2.4, acos(clamp(vObjPos.y, -1.0, 1.0)) * 3.0);
+        float n1 = fbm(uv * 2.2 + vec2(uTime * 0.06, -uTime * 0.04));
+        float n2 = fbm(uv * 5.2 - vec2(uTime * 0.08, uTime * 0.05) + n1 * 1.4);
+        // Ridged magma fissures (cracked crust rather than solid orange paint)
+        float ridge = 1.0 - abs(n2 * 2.0 - 1.0);
+        float crack = pow(clamp(ridge, 0.0, 1.0), 3.6 - uHeat * 1.6);
+        float charMask = smoothstep(0.28, 0.78, n1) * uHeat * 0.62;
+        float rim = pow(1.0 - max(dot(normalize(vNormalDir), normalize(vViewDir)), 0.0), 2.5);
+
+        vec3 basalt = vec3(0.08, 0.05, 0.04);
+        vec3 lavaRed = vec3(0.95, 0.24, 0.04);
+        vec3 lavaGold = vec3(1.45, 0.78, 0.22);
+        vec3 col = mix(basalt, lavaRed, smoothstep(0.18, 0.62, crack));
+        col = mix(col, lavaGold, smoothstep(0.58, 0.92, crack));
+        col += vec3(0.9, 0.3, 0.08) * rim * uHeat * 0.75;
+
+        float alpha = clamp(charMask + crack * uHeat * 1.15 + rim * uHeat * 0.32, 0.0, 0.92);
+        if(alpha < 0.02) discard;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: false
+  });
+}
+
+function createCraterTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  // Soft charred scorched rim fading smoothly into planet texture
+  const outer = g.createRadialGradient(64, 64, 14, 64, 64, 62);
+  outer.addColorStop(0, 'rgba(18, 10, 8, 0.95)');
+  outer.addColorStop(0.45, 'rgba(42, 18, 10, 0.78)');
+  outer.addColorStop(0.72, 'rgba(95, 36, 14, 0.32)');
+  outer.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  g.fillStyle = outer;
+  g.fillRect(0, 0, 128, 128);
+
+  // Subtle glowing molten crater core + cracked radial magma rays
+  const core = g.createRadialGradient(64, 64, 1, 64, 64, 34);
+  core.addColorStop(0, 'rgba(255, 210, 110, 0.95)');
+  core.addColorStop(0.32, 'rgba(255, 102, 28, 0.78)');
+  core.addColorStop(0.68, 'rgba(165, 34, 8, 0.28)');
+  core.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  g.fillStyle = core;
+  g.fillRect(0, 0, 128, 128);
+
+  g.strokeStyle = 'rgba(255, 140, 48, 0.55)';
+  g.lineWidth = 1.6;
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + 0.3;
+    g.beginPath();
+    g.moveTo(64 + Math.cos(a) * 6, 64 + Math.sin(a) * 6);
+    g.lineTo(64 + Math.cos(a + 0.14) * 24, 64 + Math.sin(a + 0.14) * 24);
+    g.lineTo(64 + Math.cos(a - 0.08) * 44, 64 + Math.sin(a - 0.08) * 44);
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 // Stylised persistent effects. All visual sizes and timing are exaggerated.
 export function createImpactEffects(scene, earth, camera, extras = {}) {
   const { objects, moon, addShake = () => {}, pulseBloom = () => {} } = extras;
-  const sphere = earth.mesh;
+  let target = earth;
+  let sphere = earth.mesh;
 
-  const heat = new THREE.Mesh(
-    new THREE.SphereGeometry(1.02, 40, 28),
-    new THREE.MeshBasicMaterial({ color: 0xff4d12, transparent: true, opacity: 0, depthWrite: false })
-  );
+  const heatMat = createMagmaHeatMaterial();
+  const heat = new THREE.Mesh(new THREE.SphereGeometry(1.022, 44, 30), heatMat);
+  heat.raycast = () => {};
   sphere.add(heat);
 
+  const craterTex = createCraterTexture();
   const scarRoot = new THREE.Group();
   sphere.add(scarRoot);
+
+  // Exotic / Relativistic pierce-through plasma tunnel beam
+  const pierceBeam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.22, 18, 20, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0x70f5ff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    })
+  );
+  scene.add(pierceBeam);
+  pierceBeam.visible = false;
+  let pierceTime = 0;
+  let heatTime = 0;
 
   const debris = new THREE.Group();
   scene.add(debris);
@@ -651,29 +759,30 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     activePulses.length = 0;
   }
 
-  function addCraterAt(hitNormal, damage) {
+  function addCraterAt(hitNormal, damage, tintHex = 0xffaa66) {
     localNormal.copy(hitNormal).applyQuaternion(sphere.getWorldQuaternion(new THREE.Quaternion()).invert());
-    const mark = new THREE.Group();
-    mark.position.copy(localNormal).multiplyScalar(1.022);
+    const radius = Math.min(0.62, 0.08 + damage * 0.42);
+    // Soft feathered magma-crater decal blended organically onto the sphere surface
+    const mark = new THREE.Mesh(
+      new THREE.PlaneGeometry(radius * 2, radius * 2),
+      new THREE.MeshBasicMaterial({
+        map: craterTex,
+        color: tintHex,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2
+      })
+    );
+    mark.position.copy(localNormal).multiplyScalar(1.024);
     mark.quaternion.setFromUnitVectors(zAxis, localNormal);
-    const radius = Math.min(0.7, 0.04 + damage * 0.48);
-    const crater = new THREE.Mesh(
-      new THREE.CircleGeometry(radius, 36),
-      new THREE.MeshBasicMaterial({ color: 0x130e0c, side: THREE.DoubleSide })
-    );
-    const rim = new THREE.Mesh(
-      new THREE.RingGeometry(radius * 0.8, radius, 36),
-      new THREE.MeshBasicMaterial({ color: 0xff8b38, side: THREE.DoubleSide })
-    );
-    rim.position.z = 0.004;
-    mark.add(crater, rim);
+    mark.rotateZ(Math.random() * Math.PI * 2);
     scarRoot.add(mark);
     while (scarRoot.children.length > 24) {
       const old = scarRoot.children[0];
-      old.traverse(x => {
-        x.geometry?.dispose();
-        x.material?.dispose();
-      });
+      old.geometry?.dispose();
+      old.material?.dispose();
       scarRoot.remove(old);
     }
   }
@@ -728,8 +837,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     const vKepler = Math.sqrt(gm / dist);
     const tiltAxis = new THREE.Vector3((Math.random() - 0.5) * 0.35, 1, (Math.random() - 0.5) * 0.35).normalize();
     const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
-    const speedRatio = id === 'earth' ? (shatter ? 0.78 : 0.96) : 0.8 + Math.random() * 0.12;
-    const trail = createTrailRibbon(entry.body.color, id === 'earth' ? 88 : 68);
+    const speedRatio = id === target.body.id ? (shatter ? 0.78 : 0.96) : 0.8 + Math.random() * 0.12;
+    const trail = createTrailRibbon(entry.body.color, id === target.body.id ? 88 : 68);
     trailGroup.add(trail.line, trail.sparks);
 
     capturedBodies.push({
@@ -741,10 +850,10 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       trail,
       swallowed: false,
       isMoon: false,
-      isEarth: id === 'earth',
+      isEarth: id === target.body.id,
       isRogue: false,
       colorHex: entry.body.color,
-      lockedToSafeOrbit: id === 'earth' && !shatter
+      lockedToSafeOrbit: id === target.body.id && !shatter
     });
   }
 
@@ -793,14 +902,14 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       });
     }
 
-    // 2. Capture Earth & nearby planets (detaching temporarily to scene space for free 3D spiral orbits)
+    // 2. Capture target planet & nearby planets (detaching temporarily to scene space for free 3D spiral orbits)
     const pullRadius = 22 + massMultiplier * 2.1;
     if (objects) {
       for (const [id, entry] of objects.entries()) {
         if (id === 'sun') continue;
         const wPos = entry.mesh.getWorldPosition(new THREE.Vector3());
         const dist = wPos.distanceTo(bhPos);
-        if (id === 'earth' || dist < pullRadius) {
+        if (id === target.body.id || dist < pullRadius) {
           capturePlanet(id, entry, gm, shatter);
         }
       }
@@ -850,32 +959,52 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     }
   }
 
-  function impact(r) {
+  function impact(r, kind = 'asteroid', opts = {}) {
     result = r;
     age = 0;
     debris.visible = true;
     const ringNormal = normal.clone();
-    addCraterAt(ringNormal, r.damage);
-    totalHeat = Math.min(0.85, totalHeat + Math.max(0, r.damage - 0.35) * 0.72);
-    heat.material.opacity = totalHeat;
+    const isExotic = ['needle', 'neutron', 'antimatter', 'tachyon'].includes(kind) || opts.ftl;
+    const exoticColor = kind === 'antimatter' ? 0xd966ff : kind === 'tachyon' ? 0xff66d9 : 0x6ef2ff;
+
+    addCraterAt(ringNormal, r.damage, isExotic ? exoticColor : 0xffaa66);
+    if (isExotic && !r.fragment) {
+      // Punch clean through the planet: exit wound + Cherenkov plasma tunnel!
+      addCraterAt(ringNormal.clone().negate(), Math.min(1, r.damage * 1.15), exoticColor);
+      pierceTime = 1.45;
+      pierceBeam.visible = true;
+      pierceBeam.material.color.setHex(exoticColor);
+      pierceBeam.position.copy(center);
+      pierceBeam.quaternion.setFromUnitVectors(upVec, ringNormal);
+      pierceBeam.scale.set(1 + r.damage * 1.8, Math.max(1, target.body.size * 1.4), 1 + r.damage * 1.8);
+    }
+
+    totalHeat = Math.min(0.95, totalHeat + Math.max(0.08, r.damage - 0.2) * 0.72);
+    heatMat.uniforms.uHeat.value = totalHeat;
+    wave.material.color.setHex(isExotic ? exoticColor : 0xffc482);
     wave.quaternion.setFromUnitVectors(zAxis, ringNormal);
     sphere.visible = !r.fragment;
 
-    // Emit fiery spark burst from impact point
-    const hitPoint = center.clone().addScaledVector(ringNormal, earth.body.size);
-    for (let i = 0; i < 24; i++) {
-      const spread = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.4);
-      const vel = ringNormal.clone().multiplyScalar(2.0 + Math.random() * 4.5).add(spread);
-      emitSpark(hitPoint, vel, i % 2 ? 0xffb35c : 0xff6526, 0.7 + Math.random() * 0.65, false);
+    // Emit fiery or Cherenkov spark burst from impact point
+    const hitPoint = center.clone().addScaledVector(ringNormal, target.body.size);
+    const exitPoint = center.clone().addScaledVector(ringNormal, -target.body.size);
+    for (let i = 0; i < 28; i++) {
+      const spread = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.6);
+      const fromExit = isExotic && i % 2 === 0;
+      const dirSign = fromExit ? -1 : 1;
+      const vel = ringNormal.clone().multiplyScalar(dirSign * (2.4 + Math.random() * 5.2)).add(spread);
+      const sparkCol = isExotic ? (i % 3 === 0 ? 0xffffff : exoticColor) : (i % 2 ? 0xffb35c : 0xff6526);
+      emitSpark(fromExit ? exitPoint : hitPoint, vel, sparkCol, 0.75 + Math.random() * 0.7, false);
     }
 
-    // Cinematic impact flash, bloom burst, and camera shake
+    // Cinematic impact flash, controlled bloom burst, and camera shake
     flashTime = 0.85;
     flashSphere.visible = true;
-    flashSphere.position.copy(center).addScaledVector(ringNormal, earth.body.size * 0.95);
-    flashSphere.scale.setScalar(0.35);
+    flashSphere.material.color.setHex(isExotic ? exoticColor : 0xffe2b5);
+    flashSphere.position.copy(center).addScaledVector(ringNormal, target.body.size * 0.92);
+    flashSphere.scale.setScalar(0.35 * target.body.size);
     addShake(0.18 + r.damage * 0.75, 0.65 + r.damage * 0.85);
-    pulseBloom(1.35 + r.damage * 1.15);
+    pulseBloom(isExotic ? 1.5 : 1.0 + r.damage * 0.8);
   }
 
   function updateSparks(dt) {
@@ -934,12 +1063,12 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       p.age += dt;
       const t = clamp01(p.age / p.duration);
       const inv = 1 - t;
-      p.ring.position.copy(center).addScaledVector(p.normal, earth.body.size * 1.03);
-      p.ring.scale.setScalar(0.12 + t * (1.7 + p.scaleFactor * 1.8));
-      p.ring.material.opacity = inv * inv * 0.9;
-      p.flash.position.copy(center).addScaledVector(p.normal, earth.body.size * 0.98);
-      p.flash.scale.setScalar(0.25 + t * (2.2 * p.scaleFactor));
-      p.flash.material.opacity = inv * inv * 0.95;
+      p.ring.position.copy(center).addScaledVector(p.normal, target.body.size * 1.03);
+      p.ring.scale.setScalar(0.12 * target.body.size + t * (1.5 + p.scaleFactor * 1.6) * target.body.size);
+      p.ring.material.opacity = inv * inv * 0.78;
+      p.flash.position.copy(center).addScaledVector(p.normal, target.body.size * 0.98);
+      p.flash.scale.setScalar(0.2 * target.body.size + t * (1.8 * p.scaleFactor) * target.body.size);
+      p.flash.material.opacity = inv * inv * 0.82;
       if (t >= 1) {
         pulseGroup.remove(p.ring, p.flash);
         p.ring.geometry?.dispose();
@@ -970,8 +1099,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       m.flightTime += dt;
       const t = clamp01(m.flightTime / m.duration);
       const easeT = t * t * (0.45 + 0.55 * t); // Accelerating infall
-      const dist = earth.body.size + m.startDist * (1 - easeT);
-      const arc = Math.sin(t * Math.PI) * m.arcAmp;
+      const dist = target.body.size + m.startDist * target.body.size * (1 - easeT);
+      const arc = Math.sin(t * Math.PI) * m.arcAmp * target.body.size;
 
       tmpVec
         .copy(center)
@@ -982,9 +1111,9 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       m.mesh.rotation.y += dt * 3.8;
 
       tmpDir.copy(tmpVec).sub(center).normalize();
-      m.tail.position.copy(tmpVec).addScaledVector(tmpDir, 1.15);
+      m.tail.position.copy(tmpVec).addScaledVector(tmpDir, 0.9 * target.body.size);
       m.tail.quaternion.setFromUnitVectors(upVec, tmpDir);
-      m.trail.push(tmpVec, 0.55 + t * 0.45);
+      m.trail.push(tmpVec, 0.65 + t * 0.35);
 
       if (t >= 1) {
         m.hit = true;
@@ -1004,23 +1133,23 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         m.trail = null;
 
         const hitDir = m.dir.clone().normalize();
-        const hitPos = center.clone().addScaledVector(hitDir, earth.body.size);
-        const dmg = 0.14 + storm.intensity * 0.34;
+        const hitPos = center.clone().addScaledVector(hitDir, target.body.size);
+        const dmg = 0.14 + storm.intensity * 0.32;
         addCraterAt(hitDir, dmg);
-        spawnImpactPulse(hitPos, hitDir, 0.7 + storm.intensity * 0.85);
+        spawnImpactPulse(hitPos, hitDir, 0.65 + storm.intensity * 0.75);
 
-        // Burst of molten sparks from impact site
-        const sparkN = 10 + Math.round(storm.intensity * 10);
+        // Burst of fiery sparks from impact site
+        const sparkN = 12 + Math.round(storm.intensity * 10);
         for (let k = 0; k < sparkN; k++) {
-          const jitter = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.6);
+          const jitter = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.4);
           const sVel = hitDir.clone().multiplyScalar(1.6 + Math.random() * 3.4).add(jitter);
           emitSpark(hitPos, sVel, k % 2 ? 0xffcb78 : 0xff5e1f, 0.55 + Math.random() * 0.5, false);
         }
 
-        totalHeat = Math.min(0.85, totalHeat + 0.03 + storm.intensity * 0.055);
-        heat.material.opacity = totalHeat;
-        addShake(0.09 + storm.intensity * 0.22, 0.28 + storm.intensity * 0.18);
-        pulseBloom(0.9 + storm.intensity * 0.72);
+        totalHeat = Math.min(0.95, totalHeat + 0.035 + storm.intensity * 0.055);
+        heatMat.uniforms.uHeat.value = totalHeat;
+        addShake(0.08 + storm.intensity * 0.18, 0.25 + storm.intensity * 0.16);
+        pulseBloom(0.65 + storm.intensity * 0.5);
 
         storm.onStrike?.(storm.struck, storm.total);
       }
@@ -1195,14 +1324,53 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   }
 
   return {
-    launch(r, kind, onHit) {
+    setTarget(entry) {
+      if (!entry || entry === target) return;
+      // Cleanly re-parent surface overlays to the newly selected planet
+      sphere.remove(heat, scarRoot, shieldDome);
+      for (const mark of [...scarRoot.children]) {
+        mark.geometry?.dispose();
+        mark.material?.dispose();
+        scarRoot.remove(mark);
+      }
+      target = entry;
+      sphere = entry.mesh;
+      sphere.add(heat, scarRoot, shieldDome);
+      totalHeat = 0;
+      heatMat.uniforms.uHeat.value = 0;
+      shieldDome.material.opacity = 0;
+      result = null;
+      earthWillShatter = false;
+      earthSwallowed = false;
+    },
+    launch(r, kind, onHit, opts = {}) {
       sphere.getWorldPosition(center);
       normal.copy(camera.position).sub(center).normalize();
-      flight = { time: 0, r, kind, onHit };
+      const isFastExotic = ['needle', 'neutron', 'antimatter', 'tachyon'].includes(kind) || opts.ftl;
+      const duration = kind === 'tachyon' ? 0.45 : isFastExotic ? 1.15 : 2.35;
+      flight = { time: 0, duration, r, kind, onHit, opts };
       rock.visible = true;
       tail.visible = true;
-      rock.scale.setScalar(kind === 'needle' ? 0.065 : kind === 'moon' ? earth.body.size * 0.6 : Math.max(0.2, r.damage * 0.9));
-      rock.material.color.setHex(kind === 'needle' ? 0xb5dbea : kind === 'moon' ? 0xb4b1a6 : 0x91867b);
+      const tSize = target.body.size;
+      const scale =
+        kind === 'needle' ? 0.08 * tSize :
+        kind === 'neutron' ? 0.24 * tSize :
+        kind === 'antimatter' ? 0.34 * tSize :
+        kind === 'tachyon' ? 0.16 * tSize :
+        kind === 'moon' ? tSize * 0.52 :
+        Math.max(0.18, r.damage * 0.72) * tSize;
+      rock.scale.setScalar(scale);
+      const col =
+        kind === 'needle' ? 0x9cf4ff :
+        kind === 'neutron' ? 0xd8f3ff :
+        kind === 'antimatter' ? 0xe070ff :
+        kind === 'tachyon' ? 0xff70e0 :
+        kind === 'moon' ? 0xb4b1a6 : 0x91867b;
+      rock.material.color.setHex(col);
+      rock.material.emissive.setHex(isFastExotic ? col : 0x6b220a);
+      rock.material.emissiveIntensity = isFastExotic ? 2.2 : 0.9;
+      tail.material.color.setHex(isFastExotic ? col : 0xffaa5c);
+      tail.scale.set(isFastExotic ? 1.1 : 0.85, isFastExotic ? 2.4 : 1.0, isFastExotic ? 1.1 : 0.85);
     },
     launchStorm(count = 9, onStrike, onComplete, intensity = 0.55) {
       clearStorm();
@@ -1299,7 +1467,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       result = null;
       age = 0;
       totalHeat = 0;
-      heat.material.opacity = 0;
+      heatMat.uniforms.uHeat.value = 0;
       sphere.visible = true;
       debris.visible = false;
       rock.visible = false;
@@ -1307,6 +1475,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       wave.material.opacity = 0;
       flashTime = 0;
       flashSphere.visible = false;
+      pierceTime = 0;
+      pierceBeam.visible = false;
       bhActive = false;
       bhAge = 0;
       bhDriftPhase = 0;
@@ -1342,17 +1512,17 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       bhGroup.scale.setScalar(0.05); // Smooth dramatic expansion animation in update()
       bhLensingMat.uniforms.uMass.value = clamp01(massMultiplier / 35);
       jetMat.opacity = massMultiplier >= 14 ? Math.min(0.42, (massMultiplier - 12) * 0.014) : 0;
-      bhLight.intensity = 180 + massMultiplier * 14;
+      bhLight.intensity = 140 + massMultiplier * 10;
 
       initBlackHoleCapture(massMultiplier, shatter);
 
       if (!shatter) {
-        totalHeat = Math.min(0.75, totalHeat + massMultiplier * 0.012);
-        heat.material.opacity = totalHeat;
+        totalHeat = Math.min(0.85, totalHeat + massMultiplier * 0.015);
+        heatMat.uniforms.uHeat.value = totalHeat;
       }
 
       addShake(0.32 + massMultiplier * 0.015, 1.35);
-      pulseBloom(1.8 + massMultiplier * 0.02);
+      pulseBloom(1.3 + massMultiplier * 0.02);
     },
     fireGRB(shieldPct, heatAdd) {
       sphere.getWorldPosition(center);
@@ -1360,16 +1530,16 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       grbTime = 4.2;
       grbGroup.visible = true;
       shieldDome.material.opacity = shieldPct > 0 ? Math.min(0.72, (shieldPct / 100) * 0.8) : 0;
-      totalHeat = Math.min(0.85, totalHeat + heatAdd);
-      heat.material.opacity = totalHeat;
+      totalHeat = Math.min(0.95, totalHeat + heatAdd);
+      heatMat.uniforms.uHeat.value = totalHeat;
       addShake(0.45 * (1 - (shieldPct / 100) * 0.6), 1.1);
-      pulseBloom(2.0);
+      pulseBloom(1.4);
     },
     setShield(pct) {
       shieldDome.material.opacity = pct > 0 ? Math.min(0.55, (pct / 100) * 0.6) : 0;
     },
     setEnvironmentalHeat(value) {
-      heat.material.opacity = Math.max(totalHeat, value);
+      heatMat.uniforms.uHeat.value = Math.max(totalHeat, value);
     },
     isBodyCaptured(id) {
       return bhActive && capturedBodies.some(c => c.id === id);
@@ -1380,24 +1550,37 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     update(dt) {
       sphere.getWorldPosition(center);
       if (!earthSwallowed) debris.position.copy(center);
+      heatTime += dt;
+      heatMat.uniforms.uTime.value = heatTime;
 
       if (flight) {
         flight.time += dt;
-        const t = Math.min(1, flight.time / 2.8);
+        const dur = flight.duration || 2.35;
+        const t = Math.min(1, flight.time / dur);
         const tangent = new THREE.Vector3().crossVectors(normal, upVec).normalize();
-        rock.position.copy(center).addScaledVector(normal, earth.body.size + 8 * (1 - t)).addScaledVector(tangent, -7 * (1 - t));
-        rock.rotation.x += dt;
-        rock.rotation.y += dt * 1.2;
-        tail.position.copy(rock.position).addScaledVector(normal, 1.5);
+        const tSize = target.body.size;
+        const startOff = 7.5 * tSize;
+        rock.position.copy(center).addScaledVector(normal, tSize + startOff * (1 - t)).addScaledVector(tangent, -startOff * 0.72 * (1 - t));
+        rock.rotation.x += dt * 2;
+        rock.rotation.y += dt * 2.4;
+        tail.position.copy(rock.position).addScaledVector(normal, 1.35 * tSize);
         tail.quaternion.setFromUnitVectors(upVec, normal);
         if (t >= 1) {
           const f = flight;
           flight = null;
           rock.visible = false;
           tail.visible = false;
-          impact(f.r);
+          impact(f.r, f.kind, f.opts);
           f.onHit();
         }
+      }
+
+      if (pierceTime > 0) {
+        pierceTime = Math.max(0, pierceTime - dt);
+        const fade = pierceTime / 1.45;
+        pierceBeam.position.copy(center);
+        pierceBeam.material.opacity = fade * fade * 0.85;
+        if (pierceTime === 0) pierceBeam.visible = false;
       }
 
       if (dt > 0) {
@@ -1409,8 +1592,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       if (flashTime > 0) {
         flashTime = Math.max(0, flashTime - dt);
         const p = 1 - flashTime / 0.85;
-        flashSphere.scale.setScalar(0.35 + p * 3.8);
-        flashSphere.material.opacity = (1 - p) * (1 - p) * 0.95;
+        flashSphere.scale.setScalar((0.35 + p * 3.4) * target.body.size);
+        flashSphere.material.opacity = (1 - p) * (1 - p) * 0.85;
         if (flashTime === 0) flashSphere.visible = false;
       }
 
@@ -1481,8 +1664,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
             const r = Math.max(1.1 * bhScale, (5.5 - age * 0.65) * (0.45 + (i % 11) / 11));
             dummy.position.set(Math.cos(a) * r, ((i % 9) - 4) * 0.14, Math.sin(a) * r);
           } else {
-            dummy.position.copy(dirs[i]).multiplyScalar(earth.body.size + spread * (0.4 + (i % 13) / 13));
-            if (!result.fragment) dummy.position.multiplyScalar(0.45).addScaledVector(normal, earth.body.size * 0.8);
+            dummy.position.copy(dirs[i]).multiplyScalar(target.body.size + spread * (0.4 + (i % 13) / 13));
+            if (!result.fragment) dummy.position.multiplyScalar(0.45).addScaledVector(normal, target.body.size * 0.8);
           }
           dummy.rotation.set(age * (i % 5) * 0.2, i + age * 0.12, age * 0.3);
           dummy.scale.setScalar(result.fragment ? 1.35 + (i % 9) * 0.35 : Math.max(0.01, 1 - age / 12) * (0.3 + (i % 7) * 0.1));
@@ -1491,9 +1674,9 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         }
         fragments.instanceMatrix.needsUpdate = true;
         if (!result.fragment && age > 12) debris.visible = false;
-        wave.position.copy(center).addScaledVector(normal, earth.body.size * 1.025);
-        wave.scale.setScalar(0.1 + age * (1 + result.damage * 2.2));
-        wave.material.opacity = Math.max(0, 0.82 - age * 0.22);
+        wave.position.copy(center).addScaledVector(normal, target.body.size * 1.025);
+        wave.scale.setScalar((0.1 + age * (1 + result.damage * 2.2)) * target.body.size);
+        wave.material.opacity = Math.max(0, 0.72 - age * 0.22);
       }
     },
     get busy() {
