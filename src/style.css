@@ -1,20 +1,28 @@
 ﻿:root {
+  color-scheme: dark;
   font-family: Inter, system-ui, -apple-system, sans-serif;
   color: #edf2f8;
   background: #05080f;
   font-synthesis: none;
-  --line: rgba(255, 255, 255, 0.11);
-  --line-strong: rgba(255, 255, 255, 0.22);
-  --line-accent: rgba(187, 214, 177, 0.36);
-  --muted: #92a3b7;
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.24);
+  --line-accent: rgba(187, 214, 177, 0.4);
+  --muted: #96a8bc;
   --accent: #bbd6b1;
-  --accent-bright: #dff1d8;
+  --accent-bright: #e2f3db;
   --accent-soft: rgba(187, 214, 177, 0.14);
-  --accent-glow: rgba(187, 214, 177, 0.2);
-  --panel: rgba(11, 17, 26, 0.74);
-  --panel-bar: rgba(8, 13, 21, 0.78);
-  --glass-blur: blur(18px);
-  --panel-shadow: 0 18px 46px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --accent-glow: rgba(187, 214, 177, 0.22);
+  --exotic: #a9d0ff;
+  --exotic-border: rgba(142, 194, 252, 0.28);
+  --exotic-soft: rgba(114, 172, 244, 0.08);
+  --telemetry-temp: #fbd7a8;
+  --telemetry-atmo: #b4e3f2;
+  --telemetry-crater: #f6b6a2;
+  --telemetry-vel: #d6eccf;
+  --panel: rgba(9, 15, 24, 0.8);
+  --panel-bar: rgba(7, 12, 20, 0.84);
+  --glass-blur: blur(18px) saturate(130%);
+  --panel-shadow: 0 20px 50px rgba(0, 0, 0, 0.54), inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
 * {
@@ -79,6 +87,11 @@ input {
 
 input[type="range"] {
   cursor: pointer;
+}
+
+option {
+  background: #0d1522;
+  color: #eef5fc;
 }
 
 a {
@@ -338,6 +351,7 @@ header {
   position: fixed;
   top: 102px;
   left: 348px;
+  max-width: calc(100vw - 376px);
   pointer-events: none;
   z-index: 4;
 }
@@ -378,6 +392,7 @@ header {
 
 .panel-hidden .hero {
   left: 28px;
+  max-width: calc(100vw - 56px);
 }
 
 body.sim-mode .sidebar,
@@ -403,12 +418,17 @@ body.sim-mode .hero {
 
 body.sim-mode .coords {
   right: auto;
+  max-width: calc(100vw - 856px);
   flex-direction: column;
   gap: 4px;
 }
 
 .panel-hidden .coords {
   left: 24px;
+}
+
+body.sim-mode.panel-hidden .coords {
+  max-width: calc(100vw - 524px);
 }
 
 footer {
@@ -435,6 +455,10 @@ footer {
   align-items: center;
   gap: 10px;
   font-size: 11px;
+}
+
+footer button {
+  white-space: nowrap;
 }
 
 footer input {
@@ -545,8 +569,8 @@ footer input {
   left: 50%;
   transform: translateX(-50%) translateY(-4px);
   padding: 10px 18px;
-  border: 1px solid var(--line-accent);
-  background: rgba(14, 24, 28, 0.84);
+  border: 1px solid rgba(187, 214, 177, 0.46);
+  background: rgba(11, 21, 26, 0.92);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   color: var(--accent-bright);
@@ -554,12 +578,13 @@ footer input {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.2px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 20px rgba(187, 214, 177, 0.14);
-  z-index: 10;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.56), 0 0 22px rgba(187, 214, 177, 0.16);
+  z-index: 12;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.22s ease, transform 0.22s ease;
   max-width: 90vw;
+  text-align: center;
 }
 
 #toast.show {
@@ -584,6 +609,12 @@ footer input {
 @media (min-width: 761px) {
   #touch-flight {
     display: none !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  body.sim-mode:not(.panel-hidden) .coords {
+    display: none;
   }
 }
 
@@ -614,27 +645,37 @@ footer input {
   }
   .sidebar,
   #lab {
-    width: 288px;
+    left: 14px;
+    top: 84px;
+    width: 280px;
+    padding: 17px;
   }
   .coords {
-    left: 326px;
+    left: 312px;
   }
   .hero {
-    left: 326px;
+    left: 312px;
+    max-width: calc(100vw - 332px);
   }
   #mode {
-    min-width: 108px;
+    min-width: 102px;
+  }
+}
+
+@media (max-width: 900px) {
+  body.sim-mode .coords {
+    display: none;
   }
 }
 
 @media (max-width: 760px) {
   header {
     height: 60px;
-    padding: 0 12px;
-    gap: 8px;
+    padding: 0 10px;
+    gap: 6px;
   }
   .brand {
-    font-size: 21px;
+    font-size: 20px;
     letter-spacing: 2px;
   }
   #view-switch {
@@ -642,8 +683,9 @@ footer input {
     padding: 3px;
   }
   #view-switch button {
-    padding: 7px 11px;
+    padding: 7px 10px;
     font-size: 11px;
+    white-space: nowrap;
   }
   .top-actions {
     gap: 4px;
@@ -651,6 +693,7 @@ footer input {
   .top-actions button {
     padding: 8px 8px;
     font-size: 10px;
+    white-space: nowrap;
   }
   #audio {
     display: none;
@@ -659,18 +702,20 @@ footer input {
   #lab {
     top: 70px;
     left: 10px;
-    width: min(296px, calc(100vw - 20px));
-    max-height: calc(100dvh - 186px);
-    padding: 16px;
+    width: min(304px, calc(100vw - 20px));
+    max-height: calc(100dvh - 184px);
+    padding: 15px;
     border-radius: 14px;
   }
   .hero,
   .panel-hidden .hero {
-    left: 18px;
-    top: 82px;
+    left: 16px;
+    right: 16px;
+    top: 78px;
+    max-width: calc(100vw - 32px);
   }
   .hero h1 {
-    font-size: 32px;
+    font-size: 30px;
   }
   .sidebar ~ .hero {
     display: none;
@@ -726,13 +771,36 @@ footer input {
     top: 66px;
     font-size: 10px;
     width: max-content;
-    max-width: 90vw;
+    max-width: 92vw;
   }
   #touch-flight {
-    bottom: 122px;
+    left: 14px;
+    bottom: 118px;
+  }
+  body:not(.panel-hidden) #touch-flight {
+    display: none;
   }
   .panel-hidden #touch-flight {
     display: grid;
+  }
+}
+
+@media (max-width: 420px) {
+  header {
+    padding: 0 8px;
+    gap: 4px;
+  }
+  .brand {
+    font-size: 18px;
+    letter-spacing: 1.4px;
+  }
+  #view-switch button {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+  .top-actions button {
+    padding: 7px 6px;
+    font-size: 9.5px;
   }
 }
 

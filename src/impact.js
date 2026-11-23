@@ -265,33 +265,40 @@ function createTrailRibbon(colorHex, maxPoints = 56) {
 
   const baseColor = new THREE.Color(colorHex);
   const hotColor = new THREE.Color(0xff9c4a);
-  const points = [];
+  const scratchColor = new THREE.Color();
+  const fadeTable = new Float32Array(maxPoints);
+  const invMax = 1 / maxPoints;
+  for (let i = 0; i < maxPoints; i++) {
+    fadeTable[i] = Math.pow(1 - i * invMax, 1.65) * 1.4;
+  }
+  let count = 0;
 
   return {
     line,
     sparks,
     push(vec3, heat = 0) {
-      points.unshift(vec3.clone());
-      if (points.length > maxPoints) points.pop();
-      const count = points.length;
-      const c = new THREE.Color();
+      const nextCount = count < maxPoints ? count + 1 : maxPoints;
+      if (nextCount > 1) {
+        positions.copyWithin(3, 0, (nextCount - 1) * 3);
+      }
+      positions[0] = vec3.x;
+      positions[1] = vec3.y;
+      positions[2] = vec3.z;
+      count = nextCount;
       for (let i = 0; i < count; i++) {
-        const p = points[i];
-        positions[i * 3] = p.x;
-        positions[i * 3 + 1] = p.y;
-        positions[i * 3 + 2] = p.z;
-        const fade = Math.pow(1 - i / maxPoints, 1.65);
-        c.copy(baseColor).lerp(hotColor, clamp01(heat * (1 - i / maxPoints * 0.5)));
-        colors[i * 3] = c.r * fade * 1.4;
-        colors[i * 3 + 1] = c.g * fade * 1.4;
-        colors[i * 3 + 2] = c.b * fade * 1.4;
+        const fade = fadeTable[i];
+        scratchColor.copy(baseColor).lerp(hotColor, clamp01(heat * (1 - i * invMax * 0.5)));
+        const idx = i * 3;
+        colors[idx] = scratchColor.r * fade;
+        colors[idx + 1] = scratchColor.g * fade;
+        colors[idx + 2] = scratchColor.b * fade;
       }
       geo.attributes.position.needsUpdate = true;
       geo.attributes.color.needsUpdate = true;
       geo.setDrawRange(0, count);
     },
     clear() {
-      points.length = 0;
+      count = 0;
       geo.setDrawRange(0, 0);
     },
     dispose() {
@@ -408,6 +415,26 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   sphere.add(heat);
 
   const craterTex = createCraterTexture();
+  const sharedCraterGeo = new THREE.PlaneGeometry(1, 1);
+  const sharedPulseRingGeo = new THREE.RingGeometry(0.76, 1.0, 48);
+  const sharedPulseFlashGeo = new THREE.SphereGeometry(0.42, 16, 12);
+  const sharedStormRockGeo = new THREE.IcosahedronGeometry(1, 1);
+  const sharedStormRockMat = new THREE.MeshStandardMaterial({
+    color: 0xffd1a3,
+    emissive: 0xff6b1c,
+    emissiveIntensity: 1.6,
+    roughness: 0.6
+  });
+  const sharedStormTailGeo = new THREE.ConeGeometry(1, 1, 12, 1, true);
+  const sharedStormTailMat = new THREE.MeshBasicMaterial({
+    color: 0xffa64d,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide
+  });
+  const sharedRogueGeo = new THREE.IcosahedronGeometry(1, 2);
   const scarRoot = new THREE.Group();
   sphere.add(scarRoot);
 
@@ -600,6 +627,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     gravPull: false
   }));
   let sparkCursor = 0;
+  const tmpColor = new THREE.Color();
 
   function emitSpark(origin, velocity, colorHex, maxLife = 1.1, gravPull = false) {
     const s = sparkPool[sparkCursor];
@@ -609,10 +637,10 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     s.vel.copy(velocity);
     s.life = 0;
     s.maxLife = maxLife;
-    const c = new THREE.Color(colorHex);
-    s.r = c.r;
-    s.g = c.g;
-    s.b = c.b;
+    tmpColor.set(colorHex);
+    s.r = tmpColor.r;
+    s.g = tmpColor.g;
+    s.b = tmpColor.b;
     s.gravPull = gravPull;
     sparkPoints.visible = true;
   }
@@ -648,6 +676,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   }
 
   let capturedBodies = []; // { id, mesh, pos, vel, baseScale, trail, swallowed, isEarth, isMoon, isRogue, colorHex }
+  const capturedIds = new Set();
+  let moonOrigin = null;
   let bhActive = false;
   let bhMassVal = 8;
   let bhScale = 1;
@@ -670,7 +700,10 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   const dummy = new THREE.Object3D();
   const center = new THREE.Vector3();
   const tmpVec = new THREE.Vector3();
+  const tmpVec2 = new THREE.Vector3();
+  const tmpVec3 = new THREE.Vector3();
   const tmpDir = new THREE.Vector3();
+  const tmpQuat = new THREE.Quaternion();
   const upVec = new THREE.Vector3(0, 1, 0);
   const zAxis = new THREE.Vector3(0, 0, 1);
 
@@ -689,12 +722,23 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       }
       if (item.isRogue) {
         rogueGroup.remove(item.mesh);
-        item.mesh.geometry?.dispose();
+        // sharedRogueGeo is reused across black holes — only dispose per-rogue material
         item.mesh.material?.dispose();
       } else if (item.isMoon && moon) {
+        if (moonOrigin?.parent && moon.parent !== moonOrigin.parent) {
+          moonOrigin.parent.add(moon);
+        }
+        if (moonOrigin) {
+          moon.position.copy(moonOrigin.localPos);
+          moon.scale.copy(moonOrigin.baseScale);
+          moon.quaternion.copy(moonOrigin.baseQuat);
+          moonOrigin = null;
+        } else {
+          moon.scale.setScalar(1);
+          moon.quaternion.identity();
+        }
         moon.visible = true;
-        moon.scale.setScalar(1);
-        moon.quaternion.identity();
+        moon.updateWorldMatrix(true, false);
         if (moon.material?.emissive) {
           moon.material.emissive.setHex(0x000000);
           moon.material.emissiveIntensity = 0;
@@ -711,6 +755,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
           entry.mesh.quaternion.identity();
           entry.mesh.rotation.z = orig.baseRotZ;
           entry.mesh.visible = true;
+          entry.mesh.updateWorldMatrix(true, false);
           if (orig.baseEmissive && entry.mesh.material?.emissive) {
             entry.mesh.material.emissive.copy(orig.baseEmissive);
             entry.mesh.material.emissiveIntensity = orig.baseEmissiveIntensity;
@@ -719,6 +764,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       }
     }
     capturedBodies = [];
+    capturedIds.clear();
     earthSwallowed = false;
   }
 
@@ -727,13 +773,9 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     for (const m of storm.meteors) {
       if (m.mesh) {
         stormGroup.remove(m.mesh);
-        m.mesh.geometry?.dispose();
-        m.mesh.material?.dispose();
       }
       if (m.tail) {
         stormGroup.remove(m.tail);
-        m.tail.geometry?.dispose();
-        m.tail.material?.dispose();
       }
       if (m.trail) {
         trailGroup.remove(m.trail.line, m.trail.sparks);
@@ -747,12 +789,12 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     for (const p of activePulses) {
       if (p.ring) {
         pulseGroup.remove(p.ring);
-        p.ring.geometry?.dispose();
+        // sharedPulseRingGeo is reused — only dispose per-pulse material
         p.ring.material?.dispose();
       }
       if (p.flash) {
         pulseGroup.remove(p.flash);
-        p.flash.geometry?.dispose();
+        // sharedPulseFlashGeo is reused — only dispose per-pulse material
         p.flash.material?.dispose();
       }
     }
@@ -760,11 +802,13 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   }
 
   function addCraterAt(hitNormal, damage, tintHex = 0xffaa66) {
-    localNormal.copy(hitNormal).applyQuaternion(sphere.getWorldQuaternion(new THREE.Quaternion()).invert());
+    sphere.getWorldQuaternion(tmpQuat).invert();
+    localNormal.copy(hitNormal).applyQuaternion(tmpQuat);
     const radius = Math.min(0.62, 0.08 + damage * 0.42);
-    // Soft feathered magma-crater decal blended organically onto the sphere surface
+    const diameter = radius * 2;
+    // Soft feathered magma-crater decal blended organically onto the sphere surface (shared PlaneGeometry)
     const mark = new THREE.Mesh(
-      new THREE.PlaneGeometry(radius * 2, radius * 2),
+      sharedCraterGeo,
       new THREE.MeshBasicMaterial({
         map: craterTex,
         color: tintHex,
@@ -775,13 +819,14 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         polygonOffsetFactor: -2
       })
     );
+    mark.scale.set(diameter, diameter, 1);
     mark.position.copy(localNormal).multiplyScalar(1.024);
     mark.quaternion.setFromUnitVectors(zAxis, localNormal);
     mark.rotateZ(Math.random() * Math.PI * 2);
     scarRoot.add(mark);
     while (scarRoot.children.length > 24) {
       const old = scarRoot.children[0];
-      old.geometry?.dispose();
+      // Do NOT dispose sharedCraterGeo — only dispose per-crater material
       old.material?.dispose();
       scarRoot.remove(old);
     }
@@ -789,7 +834,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
 
   function spawnImpactPulse(hitPos, hitNormal, scaleFactor = 1) {
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.76, 1.0, 48),
+      sharedPulseRingGeo,
       new THREE.MeshBasicMaterial({
         color: 0xffc67d,
         side: THREE.DoubleSide,
@@ -804,7 +849,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     ring.scale.setScalar(0.12);
 
     const flash = new THREE.Mesh(
-      new THREE.SphereGeometry(0.42 * scaleFactor, 16, 12),
+      sharedPulseFlashGeo,
       new THREE.MeshBasicMaterial({
         color: 0xffe4b8,
         transparent: true,
@@ -814,7 +859,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       })
     );
     flash.position.copy(hitPos);
-    flash.scale.setScalar(0.25);
+    flash.scale.setScalar(0.25 * scaleFactor);
 
     pulseGroup.add(ring, flash);
     activePulses.push({
@@ -828,19 +873,20 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   }
 
   function capturePlanet(id, entry, gm, shatter) {
-    if (capturedBodies.some(c => c.id === id)) return;
+    if (capturedIds.has(id)) return;
     const wPos = entry.mesh.getWorldPosition(new THREE.Vector3());
     scene.attach(entry.mesh);
 
-    const toBh = bhPos.clone().sub(wPos);
+    const toBh = tmpDir.copy(bhPos).sub(wPos);
     const dist = Math.max(1.8, toBh.length());
     const vKepler = Math.sqrt(gm / dist);
-    const tiltAxis = new THREE.Vector3((Math.random() - 0.5) * 0.35, 1, (Math.random() - 0.5) * 0.35).normalize();
+    const tiltAxis = tmpVec2.set((Math.random() - 0.5) * 0.35, 1, (Math.random() - 0.5) * 0.35).normalize();
     const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
     const speedRatio = id === target.body.id ? (shatter ? 0.78 : 0.96) : 0.8 + Math.random() * 0.12;
     const trail = createTrailRibbon(entry.body.color, id === target.body.id ? 88 : 68);
     trailGroup.add(trail.line, trail.sparks);
 
+    capturedIds.add(id);
     capturedBodies.push({
       id,
       mesh: entry.mesh,
@@ -859,11 +905,13 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
 
   function initBlackHoleCapture(massMultiplier, shatter) {
     clearCapturedBodies();
-    const earthWorld = sphere.getWorldPosition(new THREE.Vector3());
-    const camDir = camera.position.clone().sub(earthWorld).normalize();
-    const right = new THREE.Vector3().crossVectors(upVec, camDir).normalize();
+    const earthWorld = sphere.getWorldPosition(tmpVec);
+    const camDir = tmpVec2.copy(camera.position).sub(earthWorld).normalize();
+    const right = tmpVec3.crossVectors(upVec, camDir);
+    if (right.lengthSq() < 1e-5) right.set(1, 0, 0);
+    else right.normalize();
 
-    // Position the Black Hole dramatically in view near Earth
+    // Position the Black Hole dramatically in view near target planet
     bhPos.copy(earthWorld).addScaledVector(right, 6.2).addScaledVector(camDir, -2.4);
     bhPos.y = earthWorld.y + 0.4;
     bhOrigin.copy(bhPos);
@@ -876,38 +924,52 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     gridMat.uniforms.uBhPos.value.copy(bhPos);
 
     const gm = 26 + massMultiplier * 2.4;
+    const pullRadius = 22 + massMultiplier * 2.1;
 
-    // 1. Capture the Moon immediately for dramatic 3D Keplerian spiral + spaghettification
+    // 1. Capture Earth's Moon when targeting Earth or within pullRadius (compatible with nested satellite groups)
     if (moon) {
-      const mPos = moon.position.clone();
-      const toBh = bhPos.clone().sub(mPos);
-      const mDist = Math.max(1.8, toBh.length());
-      const vKepler = Math.sqrt(gm / mDist);
-      const tiltAxis = new THREE.Vector3(0.22, 1, -0.18).normalize();
-      const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
-      const trail = createTrailRibbon(0x9ce2ff, 80);
-      trailGroup.add(trail.line, trail.sparks);
-      capturedBodies.push({
-        id: 'moon',
-        mesh: moon,
-        pos: mPos,
-        vel: tang.multiplyScalar(vKepler * 0.84),
-        baseScale: new THREE.Vector3(1, 1, 1),
-        trail,
-        swallowed: false,
-        isMoon: true,
-        isEarth: false,
-        isRogue: false,
-        colorHex: 0x9ce2ff
-      });
+      const mPos = moon.getWorldPosition(new THREE.Vector3());
+      if (target.body.id === 'earth' || mPos.distanceTo(bhPos) < pullRadius) {
+        const isDirectSceneChild = moon.parent === scene;
+        moonOrigin = {
+          parent: moon.parent,
+          localPos: moon.position.clone(),
+          baseScale: isDirectSceneChild ? new THREE.Vector3(1, 1, 1) : moon.scale.clone(),
+          baseQuat: moon.quaternion.clone()
+        };
+        if (moon.parent && !isDirectSceneChild) {
+          scene.attach(moon);
+        }
+        const mBaseScale = isDirectSceneChild ? new THREE.Vector3(1, 1, 1) : moon.scale.clone();
+        const toBh = tmpDir.copy(bhPos).sub(mPos);
+        const mDist = Math.max(1.8, toBh.length());
+        const vKepler = Math.sqrt(gm / mDist);
+        const tiltAxis = tmpVec2.set(0.22, 1, -0.18).normalize();
+        const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
+        const trail = createTrailRibbon(0x9ce2ff, 80);
+        trailGroup.add(trail.line, trail.sparks);
+        capturedIds.add('moon');
+        capturedBodies.push({
+          id: 'moon',
+          mesh: moon,
+          pos: mPos,
+          vel: tang.multiplyScalar(vKepler * 0.84),
+          baseScale: mBaseScale,
+          trail,
+          swallowed: false,
+          isMoon: true,
+          isEarth: false,
+          isRogue: false,
+          colorHex: 0x9ce2ff
+        });
+      }
     }
 
     // 2. Capture target planet & nearby planets (detaching temporarily to scene space for free 3D spiral orbits)
-    const pullRadius = 22 + massMultiplier * 2.1;
     if (objects) {
       for (const [id, entry] of objects.entries()) {
         if (id === 'sun') continue;
-        const wPos = entry.mesh.getWorldPosition(new THREE.Vector3());
+        const wPos = entry.mesh.getWorldPosition(tmpVec);
         const dist = wPos.distanceTo(bhPos);
         if (id === target.body.id || dist < pullRadius) {
           capturePlanet(id, entry, gm, shatter);
@@ -921,10 +983,14 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       const angle = (i / rogueColors.length) * Math.PI * 2 + 0.35;
       const dist = 5.4 + (i % 4) * 2.55;
       const elev = (i % 2 ? 1 : -1) * (0.7 + (i % 3) * 0.75);
-      const rPos = bhPos.clone().add(new THREE.Vector3(Math.cos(angle) * dist, elev, Math.sin(angle) * dist));
+      const rPos = new THREE.Vector3(
+        bhPos.x + Math.cos(angle) * dist,
+        bhPos.y + elev,
+        bhPos.z + Math.sin(angle) * dist
+      );
       const rSize = 0.15 + (i % 3) * 0.08;
       const rMesh = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(rSize, 2),
+        sharedRogueGeo,
         new THREE.MeshStandardMaterial({
           color: rogueColors[i],
           emissive: rogueColors[i],
@@ -932,23 +998,26 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
           roughness: 0.65
         })
       );
+      rMesh.scale.setScalar(rSize);
       rMesh.position.copy(rPos);
       rogueGroup.add(rMesh);
 
-      const toBh = bhPos.clone().sub(rPos);
+      const toBh = tmpDir.copy(bhPos).sub(rPos);
       const rDist = Math.max(1.8, toBh.length());
       const vKepler = Math.sqrt(gm / rDist);
-      const tiltAxis = new THREE.Vector3((i % 2 ? 0.3 : -0.25), 1, (i % 3 ? -0.22 : 0.28)).normalize();
+      const tiltAxis = tmpVec2.set((i % 2 ? 0.3 : -0.25), 1, (i % 3 ? -0.22 : 0.28)).normalize();
       const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
       const trail = createTrailRibbon(rogueColors[i], 64);
       trailGroup.add(trail.line, trail.sparks);
 
+      const rogueId = 'rogue-' + i;
+      capturedIds.add(rogueId);
       capturedBodies.push({
-        id: 'rogue-' + i,
+        id: rogueId,
         mesh: rMesh,
         pos: rPos,
         vel: tang.multiplyScalar(vKepler * (0.78 + (i % 3) * 0.06)),
-        baseScale: new THREE.Vector3(1, 1, 1),
+        baseScale: new THREE.Vector3(rSize, rSize, rSize),
         trail,
         swallowed: false,
         isMoon: false,
@@ -963,14 +1032,15 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     result = r;
     age = 0;
     debris.visible = true;
-    const ringNormal = normal.clone();
+    const ringNormal = tmpDir.copy(normal);
     const isExotic = ['needle', 'neutron', 'antimatter', 'tachyon'].includes(kind) || opts.ftl;
     const exoticColor = kind === 'antimatter' ? 0xd966ff : kind === 'tachyon' ? 0xff66d9 : 0x6ef2ff;
 
     addCraterAt(ringNormal, r.damage, isExotic ? exoticColor : 0xffaa66);
     if (isExotic && !r.fragment) {
       // Punch clean through the planet: exit wound + Cherenkov plasma tunnel!
-      addCraterAt(ringNormal.clone().negate(), Math.min(1, r.damage * 1.15), exoticColor);
+      tmpVec.copy(ringNormal).negate();
+      addCraterAt(tmpVec, Math.min(1, r.damage * 1.15), exoticColor);
       pierceTime = 1.45;
       pierceBeam.visible = true;
       pierceBeam.material.color.setHex(exoticColor);
@@ -986,15 +1056,17 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     sphere.visible = !r.fragment;
 
     // Emit fiery or Cherenkov spark burst from impact point
-    const hitPoint = center.clone().addScaledVector(ringNormal, target.body.size);
-    const exitPoint = center.clone().addScaledVector(ringNormal, -target.body.size);
+    const hitPoint = tmpVec.copy(center).addScaledVector(ringNormal, target.body.size);
+    const exitPoint = tmpVec2.copy(center).addScaledVector(ringNormal, -target.body.size);
     for (let i = 0; i < 28; i++) {
-      const spread = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.6);
       const fromExit = isExotic && i % 2 === 0;
       const dirSign = fromExit ? -1 : 1;
-      const vel = ringNormal.clone().multiplyScalar(dirSign * (2.4 + Math.random() * 5.2)).add(spread);
+      tmpVec3.copy(ringNormal).multiplyScalar(dirSign * (2.4 + Math.random() * 5.2));
+      tmpVec3.x += (Math.random() - 0.5) * 2.6;
+      tmpVec3.y += (Math.random() - 0.5) * 2.6;
+      tmpVec3.z += (Math.random() - 0.5) * 2.6;
       const sparkCol = isExotic ? (i % 3 === 0 ? 0xffffff : exoticColor) : (i % 2 ? 0xffb35c : 0xff6526);
-      emitSpark(fromExit ? exitPoint : hitPoint, vel, sparkCol, 0.75 + Math.random() * 0.7, false);
+      emitSpark(fromExit ? exitPoint : hitPoint, tmpVec3, sparkCol, 0.75 + Math.random() * 0.7, false);
     }
 
     // Cinematic impact flash, controlled bloom burst, and camera shake
@@ -1011,21 +1083,24 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     if (!sparkPoints.visible) return;
     let anyActive = false;
     const gm = 26 + bhMassVal * 2.4;
+    const gravDamp = Math.pow(0.985, dt * 60);
+    const freeDamp = Math.pow(0.96, dt * 60);
     for (let i = 0; i < SPARK_COUNT; i++) {
       const s = sparkPool[i];
+      const idx = i * 3;
       if (!s.active) {
-        sparkCol[i * 3] = 0;
-        sparkCol[i * 3 + 1] = 0;
-        sparkCol[i * 3 + 2] = 0;
+        sparkCol[idx] = 0;
+        sparkCol[idx + 1] = 0;
+        sparkCol[idx + 2] = 0;
         continue;
       }
       s.life += dt;
       if (s.life >= s.maxLife) {
         s.active = false;
-        sparkPos[i * 3 + 1] = -9999;
-        sparkCol[i * 3] = 0;
-        sparkCol[i * 3 + 1] = 0;
-        sparkCol[i * 3 + 2] = 0;
+        sparkPos[idx + 1] = -9999;
+        sparkCol[idx] = 0;
+        sparkCol[idx + 1] = 0;
+        sparkCol[idx + 2] = 0;
         continue;
       }
       anyActive = true;
@@ -1034,23 +1109,26 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         const d = tmpDir.length();
         if (d < bhScale * 1.05) {
           s.active = false;
-          sparkPos[i * 3 + 1] = -9999;
+          sparkPos[idx + 1] = -9999;
+          sparkCol[idx] = 0;
+          sparkCol[idx + 1] = 0;
+          sparkCol[idx + 2] = 0;
           continue;
         }
         tmpDir.multiplyScalar(1 / Math.max(d, 0.2));
         s.vel.addScaledVector(tmpDir, (gm * 1.25 / (d * d + 0.8)) * dt);
-        s.vel.multiplyScalar(Math.pow(0.985, dt * 60));
+        s.vel.multiplyScalar(gravDamp);
       } else {
-        s.vel.multiplyScalar(Math.pow(0.96, dt * 60));
+        s.vel.multiplyScalar(freeDamp);
       }
       s.pos.addScaledVector(s.vel, dt);
-      const fade = Math.pow(1 - s.life / s.maxLife, 1.4);
-      sparkPos[i * 3] = s.pos.x;
-      sparkPos[i * 3 + 1] = s.pos.y;
-      sparkPos[i * 3 + 2] = s.pos.z;
-      sparkCol[i * 3] = s.r * fade * 1.65;
-      sparkCol[i * 3 + 1] = s.g * fade * 1.65;
-      sparkCol[i * 3 + 2] = s.b * fade * 1.65;
+      const fade = Math.pow(1 - s.life / s.maxLife, 1.4) * 1.65;
+      sparkPos[idx] = s.pos.x;
+      sparkPos[idx + 1] = s.pos.y;
+      sparkPos[idx + 2] = s.pos.z;
+      sparkCol[idx] = s.r * fade;
+      sparkCol[idx + 1] = s.g * fade;
+      sparkCol[idx + 2] = s.b * fade;
     }
     sparkGeo.attributes.position.needsUpdate = true;
     sparkGeo.attributes.color.needsUpdate = true;
@@ -1067,13 +1145,12 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       p.ring.scale.setScalar(0.12 * target.body.size + t * (1.5 + p.scaleFactor * 1.6) * target.body.size);
       p.ring.material.opacity = inv * inv * 0.78;
       p.flash.position.copy(center).addScaledVector(p.normal, target.body.size * 0.98);
-      p.flash.scale.setScalar(0.2 * target.body.size + t * (1.8 * p.scaleFactor) * target.body.size);
+      p.flash.scale.setScalar((0.2 + t * 1.8 * p.scaleFactor) * target.body.size * p.scaleFactor);
       p.flash.material.opacity = inv * inv * 0.82;
       if (t >= 1) {
         pulseGroup.remove(p.ring, p.flash);
-        p.ring.geometry?.dispose();
+        // sharedPulseRingGeo & sharedPulseFlashGeo are reused — only dispose per-pulse materials
         p.ring.material?.dispose();
-        p.flash.geometry?.dispose();
         p.flash.material?.dispose();
         activePulses.splice(i, 1);
       }
@@ -1120,30 +1197,28 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         remaining--;
         storm.struck++;
 
-        // Remove meteor mesh & tail, dispose trail
+        // Remove meteor mesh & tail (shared geometries/materials kept alive), dispose trail
         stormGroup.remove(m.mesh, m.tail);
-        m.mesh.geometry?.dispose();
-        m.mesh.material?.dispose();
-        m.tail.geometry?.dispose();
-        m.tail.material?.dispose();
         trailGroup.remove(m.trail.line, m.trail.sparks);
         m.trail.dispose();
         m.mesh = null;
         m.tail = null;
         m.trail = null;
 
-        const hitDir = m.dir.clone().normalize();
-        const hitPos = center.clone().addScaledVector(hitDir, target.body.size);
+        tmpDir.copy(m.dir).normalize();
+        tmpVec2.copy(center).addScaledVector(tmpDir, target.body.size);
         const dmg = 0.14 + storm.intensity * 0.32;
-        addCraterAt(hitDir, dmg);
-        spawnImpactPulse(hitPos, hitDir, 0.65 + storm.intensity * 0.75);
+        addCraterAt(tmpDir, dmg);
+        spawnImpactPulse(tmpVec2, tmpDir, 0.65 + storm.intensity * 0.75);
 
-        // Burst of fiery sparks from impact site
+        // Burst of fiery sparks from impact site (zero per-spark Vector3 allocation)
         const sparkN = 12 + Math.round(storm.intensity * 10);
         for (let k = 0; k < sparkN; k++) {
-          const jitter = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.4);
-          const sVel = hitDir.clone().multiplyScalar(1.6 + Math.random() * 3.4).add(jitter);
-          emitSpark(hitPos, sVel, k % 2 ? 0xffcb78 : 0xff5e1f, 0.55 + Math.random() * 0.5, false);
+          tmpVec3.copy(tmpDir).multiplyScalar(1.6 + Math.random() * 3.4);
+          tmpVec3.x += (Math.random() - 0.5) * 2.4;
+          tmpVec3.y += (Math.random() - 0.5) * 2.4;
+          tmpVec3.z += (Math.random() - 0.5) * 2.4;
+          emitSpark(tmpVec2, tmpVec3, k % 2 ? 0xffcb78 : 0xff5e1f, 0.55 + Math.random() * 0.5, false);
         }
 
         totalHeat = Math.min(0.95, totalHeat + 0.035 + storm.intensity * 0.055);
@@ -1163,13 +1238,13 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   }
 
   function updateSwarm(dt) {
-    const c = new THREE.Color();
+    const heightDamp = 1 - Math.min(0.9, dt * 0.65);
     for (let i = 0; i < SWARM_COUNT; i++) {
       const m = swarmMeta[i];
       const angVel = (1.6 / Math.pow(Math.max(0.7, m.radius * 0.5), 1.3)) * m.speed;
       m.angle += angVel * dt;
       m.radius -= (0.45 + 2.4 / (m.radius * m.radius)) * dt;
-      m.height *= 1 - Math.min(0.9, dt * 0.65);
+      m.height *= heightDamp;
 
       if (m.radius < 1.05) {
         m.radius = 6.5 + Math.random() * 7.5;
@@ -1178,18 +1253,19 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       }
 
       const tilt = 0.25;
-      const x = Math.cos(m.angle) * m.radius;
-      const z = Math.sin(m.angle) * m.radius;
-      const y = m.height + Math.sin(m.angle) * m.radius * tilt;
-      swarmPos[i * 3] = x;
-      swarmPos[i * 3 + 1] = y;
-      swarmPos[i * 3 + 2] = z;
+      const cosA = Math.cos(m.angle);
+      const sinA = Math.sin(m.angle);
+      const idx = i * 3;
+      swarmPos[idx] = cosA * m.radius;
+      swarmPos[idx + 1] = m.height + sinA * m.radius * tilt;
+      swarmPos[idx + 2] = sinA * m.radius;
 
       const heatFrac = clamp01(1 - (m.radius - 1.05) / 7.5);
-      c.setHSL(0.08 + (1 - heatFrac) * 0.58, 0.95, 0.55 + heatFrac * 0.4);
-      swarmCol[i * 3] = c.r * (0.9 + heatFrac * 1.2);
-      swarmCol[i * 3 + 1] = c.g * (0.9 + heatFrac * 1.2);
-      swarmCol[i * 3 + 2] = c.b * (0.9 + heatFrac * 1.2);
+      tmpColor.setHSL(0.08 + (1 - heatFrac) * 0.58, 0.95, 0.55 + heatFrac * 0.4);
+      const gain = 0.9 + heatFrac * 1.2;
+      swarmCol[idx] = tmpColor.r * gain;
+      swarmCol[idx + 1] = tmpColor.g * gain;
+      swarmCol[idx + 2] = tmpColor.b * gain;
     }
     swarmGeo.attributes.position.needsUpdate = true;
     swarmGeo.attributes.color.needsUpdate = true;
@@ -1205,7 +1281,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     if (objects) {
       for (const [id, entry] of objects.entries()) {
         if (id === 'sun') continue;
-        if (capturedBodies.some(c => c.id === id)) continue;
+        if (capturedIds.has(id)) continue;
         const wPos = entry.mesh.getWorldPosition(tmpVec);
         if (wPos.distanceTo(bhPos) < pullRadius) {
           capturePlanet(id, entry, gm, earthWillShatter);
@@ -1215,6 +1291,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
 
     const subSteps = 4;
     const h = dt / subSteps;
+    const innerDrag = Math.pow(0.982, h * 60);
+    const outerDrag = Math.pow(0.994, h * 60);
 
     for (const item of capturedBodies) {
       if (item.swallowed) continue;
@@ -1231,7 +1309,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         item.vel.addScaledVector(tmpDir, accel * h);
 
         if (item.lockedToSafeOrbit) {
-          // Keep Earth in an exhilarating perturbed 3D Keplerian tidal orbit without swallowing
+          // Keep target planet in an exhilarating perturbed 3D Keplerian tidal orbit without swallowing
           const safeR = tidalRadius * 0.84;
           const radialVel = item.vel.dot(tmpDir);
           if (dist < safeR) {
@@ -1254,8 +1332,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
             tmpVec.set(-tmpDir.z, 0.08 * tmpDir.y, tmpDir.x).normalize();
             item.vel.addScaledVector(tmpVec, (gm * 0.045 / (dist + 0.8)) * h);
           }
-          const drag = dist < tidalRadius ? 0.982 : 0.994;
-          item.vel.multiplyScalar(Math.pow(drag, h * 60));
+          item.vel.multiplyScalar(dist < tidalRadius ? innerDrag : outerDrag);
         }
 
         item.pos.addScaledVector(item.vel, h);
@@ -1285,12 +1362,13 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
           item.mesh.material.emissive.setRGB(1.0 * prox, 0.42 * prox, 0.14 * prox);
           item.mesh.material.emissiveIntensity = prox * 2.35;
         }
-        // Shed glowing tidal sparks ripped toward the accretion disk
+        // Shed glowing tidal sparks ripped toward the accretion disk (zero Vector3 allocation)
         if (prox > 0.16 && Math.random() < prox * 0.65) {
-          const sparkVel = item.vel.clone().multiplyScalar(0.55)
-            .addScaledVector(tmpDir, 1.8 + prox * 3.5)
-            .add(new THREE.Vector3((Math.random() - 0.5) * 1.4, (Math.random() - 0.5) * 1.1, (Math.random() - 0.5) * 1.4));
-          emitSpark(item.pos, sparkVel, prox > 0.6 ? 0xffb86b : (item.colorHex || 0x8be2ff), 0.75 + Math.random() * 0.55, true);
+          tmpVec2.copy(item.vel).multiplyScalar(0.55).addScaledVector(tmpDir, 1.8 + prox * 3.5);
+          tmpVec2.x += (Math.random() - 0.5) * 1.4;
+          tmpVec2.y += (Math.random() - 0.5) * 1.1;
+          tmpVec2.z += (Math.random() - 0.5) * 1.4;
+          emitSpark(item.pos, tmpVec2, prox > 0.6 ? 0xffb86b : (item.colorHex || 0x8be2ff), 0.75 + Math.random() * 0.55, true);
         }
       } else {
         item.mesh.scale.copy(item.baseScale);
@@ -1307,8 +1385,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         const burstN = item.isEarth ? 36 : 16;
         for (let k = 0; k < burstN; k++) {
           const ang = (k / burstN) * Math.PI * 2;
-          const bVel = new THREE.Vector3(Math.cos(ang) * 4.2, (Math.random() - 0.5) * 2.4, Math.sin(ang) * 4.2);
-          emitSpark(item.pos, bVel, k % 2 ? 0xffd28a : (item.colorHex || 0xff7b42), 0.9 + Math.random() * 0.6, true);
+          tmpVec2.set(Math.cos(ang) * 4.2, (Math.random() - 0.5) * 2.4, Math.sin(ang) * 4.2);
+          emitSpark(item.pos, tmpVec2, k % 2 ? 0xffd28a : (item.colorHex || 0xff7b42), 0.9 + Math.random() * 0.6, true);
         }
         addShake(item.isEarth ? 0.95 : 0.28, item.isEarth ? 1.4 : 0.5);
         pulseBloom(item.isEarth ? 2.4 : 1.45);
@@ -1326,10 +1404,26 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
   return {
     setTarget(entry) {
       if (!entry || entry === target) return;
+      // Clear any active transient impact/storm/beam/pulse/spark effects so nothing freezes or teleports
+      flight = null;
+      rock.visible = false;
+      tail.visible = false;
+      clearStorm();
+      clearPulses();
+      clearSparks();
+      age = 0;
+      debris.visible = false;
+      wave.material.opacity = 0;
+      flashTime = 0;
+      flashSphere.visible = false;
+      pierceTime = 0;
+      pierceBeam.visible = false;
+      grbTime = 0;
+      grbGroup.visible = false;
       // Cleanly re-parent surface overlays to the newly selected planet
       sphere.remove(heat, scarRoot, shieldDome);
       for (const mark of [...scarRoot.children]) {
-        mark.geometry?.dispose();
+        // sharedCraterGeo is shared — never dispose it here
         mark.material?.dispose();
         scarRoot.remove(mark);
       }
@@ -1400,28 +1494,12 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         tangent.normalize();
 
         const size = 0.10 + clampedInt * 0.13 + Math.random() * 0.05;
-        const mMesh = new THREE.Mesh(
-          new THREE.IcosahedronGeometry(size, 1),
-          new THREE.MeshStandardMaterial({
-            color: 0xffd1a3,
-            emissive: 0xff6b1c,
-            emissiveIntensity: 1.6,
-            roughness: 0.6
-          })
-        );
+        const mMesh = new THREE.Mesh(sharedStormRockGeo, sharedStormRockMat);
+        mMesh.scale.setScalar(size);
         mMesh.visible = false;
 
-        const mTail = new THREE.Mesh(
-          new THREE.ConeGeometry(size * 1.15, 2.1 + clampedInt * 1.2, 12, 1, true),
-          new THREE.MeshBasicMaterial({
-            color: 0xffa64d,
-            transparent: true,
-            opacity: 0.72,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-            side: THREE.DoubleSide
-          })
-        );
+        const mTail = new THREE.Mesh(sharedStormTailGeo, sharedStormTailMat);
+        mTail.scale.set(size * 1.15, 2.1 + clampedInt * 1.2, size * 1.15);
         mTail.visible = false;
         stormGroup.add(mMesh, mTail);
 
@@ -1494,7 +1572,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       clearCapturedBodies();
       for (const mark of [...scarRoot.children]) {
         mark.traverse(x => {
-          x.geometry?.dispose();
+          if (x.geometry && x.geometry !== sharedCraterGeo) x.geometry.dispose();
           x.material?.dispose();
         });
         scarRoot.remove(mark);
@@ -1542,7 +1620,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       heatMat.uniforms.uHeat.value = Math.max(totalHeat, value);
     },
     isBodyCaptured(id) {
-      return bhActive && capturedBodies.some(c => c.id === id);
+      return bhActive && capturedIds.has(id);
     },
     get isBlackHoleActive() {
       return bhActive;
@@ -1557,10 +1635,12 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         flight.time += dt;
         const dur = flight.duration || 2.35;
         const t = Math.min(1, flight.time / dur);
-        const tangent = new THREE.Vector3().crossVectors(normal, upVec).normalize();
+        tmpVec.crossVectors(normal, upVec);
+        if (tmpVec.lengthSq() < 1e-5) tmpVec.set(1, 0, 0);
+        else tmpVec.normalize();
         const tSize = target.body.size;
         const startOff = 7.5 * tSize;
-        rock.position.copy(center).addScaledVector(normal, tSize + startOff * (1 - t)).addScaledVector(tangent, -startOff * 0.72 * (1 - t));
+        rock.position.copy(center).addScaledVector(normal, tSize + startOff * (1 - t)).addScaledVector(tmpVec, -startOff * 0.72 * (1 - t));
         rock.rotation.x += dt * 2;
         rock.rotation.y += dt * 2.4;
         tail.position.copy(rock.position).addScaledVector(normal, 1.35 * tSize);

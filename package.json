@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/physics.test.js"
+    "test": "node --test src/physics.test.js src/satellites.test.js"
   },
   "dependencies": {
     "three": "^0.180.0"
