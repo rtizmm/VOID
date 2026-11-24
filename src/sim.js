@@ -30,7 +30,16 @@ const CASES = Object.freeze([
   Object.freeze(['giant', '✹', 'Dev Güneş']),
   Object.freeze(['blackhole', '🕳', 'Kara Delik']),
   Object.freeze(['grb', '⚡', 'Gama & Kalkan']),
-  Object.freeze(['storm', '☄', 'Meteor Yağmuru'])
+  Object.freeze(['storm', '☄', 'Meteor Yağmuru']),
+  Object.freeze(['collision', '💥', 'Çarpışma']),
+  Object.freeze(['supernova', '🌟', 'Süpernova']),
+  Object.freeze(['creator', '🛠️', 'Sistem Kur']),
+  Object.freeze(['defense', '🛰', 'Savunma']),
+  Object.freeze(['terraform', '🌍', 'Terraforming']),
+  Object.freeze(['dyson', '☀', 'Dyson Küresi']),
+  Object.freeze(['wormhole', '🌀', 'Solucan Deliği']),
+  Object.freeze(['galaxy', '🌌', 'Galaksi']),
+  Object.freeze(['surface', '🔭', 'Yüzey Modu'])
 ]);
 const CASE_IDS = new Set(CASES.map(([id]) => id));
 
@@ -83,11 +92,25 @@ export function createSimulator({
   setPanel,
   addShake,
   pulseBloom,
-  playSfx
+  playSfx,
+  cosmosFx,
+  megaSystems = {}
 }) {
+  const { defenseSys, terraformSys, dysonSys, wormholeSys, galaxySys, surfaceSys } = megaSystems;
   const earth = objects.get('earth');
   const sun = objects.get('sun');
   let targetId = 'earth';
+  let impactorId = 'mars';
+  let creatorKind = 'planet';
+  let creatorSize = 1.4;
+  let creatorDist = 36;
+  let creatorColor = '#58c9ff';
+  let creatorRings = true;
+  let defenseCount = 4;
+  let terraformPct = 100;
+  let dysonPct = 65;
+  let wormholeDest = 'saturn';
+  let surfaceHost = 'earth';
   const currentTarget = () =>
     (isAllowedKey(PLANET_PROFILES, targetId) && objects.get(targetId)) || earth;
   const targetProfile = () =>
@@ -221,6 +244,9 @@ export function createSimulator({
     }
     if (titleEl) titleEl.textContent = title;
     if (descEl) descEl.textContent = description;
+    if (targetId === 'earth') {
+      cosmosFx?.setEarthLifeFraction(initial > 0 ? survivors / initial : 0);
+    }
     updateTelemetry();
   }
 
@@ -659,6 +685,254 @@ export function createSimulator({
       );
     }
 
+    if (caseId === 'collision') {
+      const impRow = document.createElement('div');
+      impRow.className = 'sim-row';
+      const impHead = document.createElement('div');
+      impHead.className = 'sim-row-head';
+      const impLbl = document.createElement('label');
+      impLbl.htmlFor = 'impactor-planet';
+      impLbl.textContent = 'Fırlatılacak Gezegen';
+      const impOut = document.createElement('output');
+      impOut.textContent = isAllowedKey(PLANET_PROFILES, impactorId) ? PLANET_PROFILES[impactorId].name : 'Mars';
+      impHead.append(impLbl, impOut);
+
+      const impSel = document.createElement('select');
+      impSel.id = 'impactor-planet';
+      impSel.className = 'sim-select';
+      for (const id of PLANET_IDS) {
+        if (id === 'sun' || id === targetId) continue;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.selected = id === impactorId;
+        opt.textContent = PLANET_PROFILES[id].name;
+        impSel.append(opt);
+      }
+      if (!impSel.value && impSel.options.length) {
+        impactorId = impSel.options[0].value;
+        impOut.textContent = PLANET_PROFILES[impactorId].name;
+      }
+      impSel.onchange = e => {
+        if (isAllowedKey(PLANET_PROFILES, e.target.value) && e.target.value !== targetId) {
+          impactorId = e.target.value;
+          impOut.textContent = PLANET_PROFILES[impactorId].name;
+        }
+      };
+      impRow.append(impHead, impSel);
+      nodes.push(
+        impRow,
+        createTip(
+          `${PLANET_PROFILES[impactorId]?.name || 'Mars'} gezegenini ${pName} üzerine fırlatır; çarpışma anında küçük gök cismi parçalanıp etrafında dönen erimiş bir enkaz halkası oluşturur.`
+        )
+      );
+    }
+
+    if (caseId === 'supernova') {
+      nodes.push(
+        createTip(
+          'Güneş önce Kırmızı Dev aşamasında şişip kararsızlaşır, ardından Süpernova şok dalgası ve renkli nebula bulutuyla patlar; merkezde hızla dönen ışın saçan bir Pulsar (Nötron Yıldızı) kalır.'
+        )
+      );
+    }
+
+    if (caseId === 'creator') {
+      nodes.push(
+        createPresetGroup([
+          { label: '🪐 Yeni Gezegen', active: creatorKind === 'planet', onClick: () => { creatorKind = 'planet'; render(); } },
+          { label: '⭐ İkinci Yıldız (Çift)', active: creatorKind === 'star', onClick: () => { creatorKind = 'star'; render(); } }
+        ]),
+        createRangeControl({
+          label: creatorKind === 'star' ? 'Yıldız boyutu' : 'Gezegen boyutu',
+          id: 'creator-size',
+          min: 0.5,
+          max: creatorKind === 'star' ? 6.0 : 3.8,
+          step: 0.1,
+          value: creatorSize,
+          unit: '×',
+          onChange: v => { creatorSize = v; }
+        }),
+        createRangeControl({
+          label: 'Yörünge uzaklığı',
+          id: 'creator-dist',
+          min: 12,
+          max: 96,
+          step: 2,
+          value: creatorDist,
+          unit: 'u',
+          onChange: v => { creatorDist = Math.round(v); }
+        }),
+        createPresetGroup([
+          { label: 'Buz Mavisi', active: creatorColor === '#58c9ff', onClick: () => { creatorColor = '#58c9ff'; render(); } },
+          { label: 'Kızıl Lav', active: creatorColor === '#ff6b4a', onClick: () => { creatorColor = '#ff6b4a'; render(); } },
+          { label: 'Zümrüt', active: creatorColor === '#5ce6a0', onClick: () => { creatorColor = '#5ce6a0'; render(); } },
+          { label: 'Mor Gaz', active: creatorColor === '#b57cff', onClick: () => { creatorColor = '#b57cff'; render(); } },
+          { label: 'Altın Yıldız', active: creatorColor === '#ffd275', onClick: () => { creatorColor = '#ffd275'; render(); } }
+        ])
+      );
+      if (creatorKind === 'planet') {
+        nodes.push(
+          createPresetGroup([
+            { label: '◎ Halkalı', active: creatorRings, onClick: () => { creatorRings = true; render(); } },
+            { label: '○ Halkasız', active: !creatorRings, onClick: () => { creatorRings = false; render(); } }
+          ])
+        );
+      }
+      const createdN = cosmosFx?.getCustomBodyCount?.() || 0;
+      nodes.push(
+        createTip(
+          `Kendi yıldız veya gezegenini sisteme ekle (ekli özel cisim: ${createdN}). İstediğin kadar ekleyip Çift Yıldızlı sistem kurabilirsin.`
+        )
+      );
+      if (createdN > 0) {
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'sim-reset';
+        clearBtn.textContent = `✕ Özel cisimleri temizle (${createdN})`;
+        clearBtn.onclick = () => {
+          cosmosFx?.clearCustomBodies();
+          notify('ÖZEL GÖK CİSİMLERİ TEMİZLENDİ');
+          render();
+        };
+        nodes.push(clearBtn);
+      }
+    }
+
+    if (caseId === 'defense') {
+      nodes.push(
+        createRangeControl({
+          label: 'Savunma uydusu sayısı',
+          id: 'defense-count',
+          min: 0,
+          max: 8,
+          step: 1,
+          value: defenseCount,
+          unit: 'uydu',
+          onChange: v => { defenseCount = Math.round(v); }
+        }),
+        createTip(
+          `${pName} yörüngesine Uzay İstasyonu ve otomatik lazerli savunma uyduları kurar. Meteor Yağmuru başlattığında uydular meteorları havada vurup parçalar! (Önlenen meteor: ${defenseSys?.getIntercepted?.() || 0})`
+        )
+      );
+    }
+
+    if (caseId === 'terraform') {
+      const tfTarget = targetId === 'earth' ? 'Dünya (Buzul Çağı)' : targetId === 'mars' || targetId === 'venus' ? `${pName} (Terraforming)` : 'Mars / Venüs / Dünya seçin';
+      nodes.push(
+        createRangeControl({
+          label: targetId === 'earth' ? 'Buzul Çağı kaplaması' : 'Terraforming ilerlemesi',
+          id: 'terraform-pct',
+          min: 0,
+          max: 100,
+          step: 5,
+          value: terraformPct,
+          unit: '%',
+          onChange: v => { terraformPct = Math.round(v); }
+        }),
+        createPresetGroup([
+          { label: 'Mars Yaşanabilir', onClick: () => { targetId = 'mars'; terraformPct = 100; select('mars'); render(); } },
+          { label: 'Venüs Yaşanabilir', onClick: () => { targetId = 'venus'; terraformPct = 100; select('venus'); render(); } },
+          { label: 'Kartopu Dünya ❄️', onClick: () => { targetId = 'earth'; terraformPct = 100; select('earth'); render(); } }
+        ]),
+        createTip(`Aktif mod: ${tfTarget}. Mars ve Venüs'te okyanuslar, yeşil kıtalar, koloni nüfusu ve gece şehir ışıkları oluşur; Dünya'da Buzul Çağı başlar.`)
+      );
+    }
+
+    if (caseId === 'dyson') {
+      nodes.push(
+        createRangeControl({
+          label: 'Dyson Küresi tamamlanma',
+          id: 'dyson-pct',
+          min: 0,
+          max: 100,
+          step: 5,
+          value: dysonPct,
+          unit: '%',
+          onChange: v => { dysonPct = Math.round(v); }
+        }),
+        createPresetGroup([
+          { label: '%25 · Sürü', onClick: () => { dysonPct = 25; render(); } },
+          { label: '%65 · Halkalar', onClick: () => { dysonPct = 65; render(); } },
+          { label: '%100 · Tip-II', onClick: () => { dysonPct = 100; render(); } }
+        ]),
+        createTip('Güneş etrafına altıgen enerji kolektörleri ve enerji halkaları inşa eder. Tamamlandıkça Kardashev Tip-II enerjisi artar ve Güneş ışığı kısılır.')
+      );
+    }
+
+    if (caseId === 'wormhole') {
+      const destRow = document.createElement('div');
+      destRow.className = 'sim-row';
+      const destHead = document.createElement('div');
+      destHead.className = 'sim-row-head';
+      const destLbl = document.createElement('label');
+      destLbl.htmlFor = 'wormhole-dest';
+      destLbl.textContent = 'Çıkış Gezegeni';
+      const destOut = document.createElement('output');
+      destOut.textContent = PLANET_PROFILES[wormholeDest]?.name || 'Satürn';
+      destHead.append(destLbl, destOut);
+      const destSel = document.createElement('select');
+      destSel.id = 'wormhole-dest';
+      destSel.className = 'sim-select';
+      for (const id of PLANET_IDS) {
+        if (id === 'sun' || id === targetId) continue;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.selected = id === wormholeDest;
+        opt.textContent = PLANET_PROFILES[id].name;
+        destSel.append(opt);
+      }
+      destSel.onchange = e => {
+        if (isAllowedKey(PLANET_PROFILES, e.target.value)) {
+          wormholeDest = e.target.value;
+          destOut.textContent = PLANET_PROFILES[wormholeDest].name;
+        }
+      };
+      destRow.append(destHead, destSel);
+      nodes.push(
+        destRow,
+        createTip(`${pName} ile ${PLANET_PROFILES[wormholeDest]?.name || 'Satürn'} arasında çift yönlü Solucan Deliği açar. Serbest Uçuşta portalın içine uçarak veya aşağıdaki butonla anında ışınlanabilirsin.`)
+      );
+      if (wormholeSys?.isActive?.()) {
+        const jumpBtn = document.createElement('button');
+        jumpBtn.type = 'button';
+        jumpBtn.className = 'sim-reset';
+        jumpBtn.textContent = '🌀 Portaldan Geç (Işınlan)';
+        jumpBtn.onclick = () => wormholeSys.jumpToExit();
+        nodes.push(jumpBtn);
+      }
+    }
+
+    if (caseId === 'galaxy') {
+      nodes.push(
+        createTip('Samanyolu ve Andromeda spiral galaksilerini 8.000 yıldız parçacığı ve çift çekirdekli kütleçekimiyle çarpıştırır. Gelgit kuyruklarının oluşumunu izle!')
+      );
+      if (galaxySys?.isActive?.()) {
+        const exitG = document.createElement('button');
+        exitG.type = 'button';
+        exitG.className = 'sim-reset';
+        exitG.textContent = '↩ Güneş Sistemine Dön';
+        exitG.onclick = () => { galaxySys.stop(); select('earth'); render(); };
+        nodes.push(exitG);
+      }
+    }
+
+    if (caseId === 'surface') {
+      nodes.push(
+        createPresetGroup([
+          { label: '🌍 Dünya Yüzeyi', active: surfaceHost === 'earth', onClick: () => { surfaceHost = 'earth'; render(); } },
+          { label: '🔴 Mars Yüzeyi', active: surfaceHost === 'mars', onClick: () => { surfaceHost = 'mars'; render(); } }
+        ]),
+        createTip('Seçtiğin gezegenin yüzeyine inip gökyüzüne bak! Kara delik, Süpernova veya Meteor Yağmuru başlattığında gökyüzünde olanları yerden izleyebilirsin.')
+      );
+      if (surfaceSys?.isActive?.()) {
+        const exitS = document.createElement('button');
+        exitS.type = 'button';
+        exitS.className = 'sim-reset';
+        exitS.textContent = '🚀 Yüzeyden Uzaya Çık';
+        exitS.onclick = () => { surfaceSys.exit(); select(surfaceHost); render(); };
+        nodes.push(exitS);
+      }
+    }
+
     if (caseId === 'asteroid' || caseId === 'relativistic' || caseId === 'moon') {
       const energyBox = document.createElement('div');
       energyBox.className = 'energy-preview';
@@ -669,12 +943,15 @@ export function createSimulator({
       nodes.push(energyBox);
     }
 
-    const runLabel = effects.destroyed
+    const busyAny = Boolean(effects.busy || cosmosFx?.isCollisionBusy?.());
+    const runLabel = effects.destroyed && caseId !== 'creator' && caseId !== 'supernova'
       ? `${pName} yok · önce sıfırla`
-      : effects.busy
+      : busyAny
         ? caseId === 'storm'
           ? 'Meteor yağmuru sürüyor…'
-          : 'Cisim yaklaşıyor…'
+          : caseId === 'collision'
+            ? 'Gezegen yaklaşıyor…'
+            : 'Cisim yaklaşıyor…'
         : caseId === 'sun'
           ? sunRunning
             ? 'Zamanı duraklat'
@@ -689,13 +966,36 @@ export function createSimulator({
                   ? 'Gama patlamasını ateşle ⚡'
                   : caseId === 'storm'
                     ? 'Meteor yağmurunu başlat ☄'
-                    : 'Atışı başlat ↗';
+                    : caseId === 'collision'
+                      ? 'Gezegenleri çarpıştır 💥'
+                      : caseId === 'supernova'
+                        ? 'Süpernovayı patlat 🌟'
+                        : caseId === 'creator'
+                          ? creatorKind === 'star'
+                            ? 'İkinci yıldızı yerleştir ⭐'
+                            : 'Gezegeni yörüngeye ekle 🪐'
+                          : caseId === 'defense'
+                            ? `Savunma ağını kur (${defenseCount} uydu) 🛰`
+                            : caseId === 'terraform'
+                              ? targetId === 'earth'
+                                ? `Buzul Çağını uygula (%${terraformPct}) ❄️`
+                                : `Terraforming uygula (%${terraformPct}) 🌍`
+                              : caseId === 'dyson'
+                                ? `Dyson Küresini inşa et (%${dysonPct}) ☀`
+                                : caseId === 'wormhole'
+                                  ? 'Solucan Deliğini aç 🌀'
+                                  : caseId === 'galaxy'
+                                    ? 'Galaksi Çarpışmasını başlat 🌌'
+                                    : caseId === 'surface'
+                                      ? 'Yüzeye in & gökyüzünü izle 🔭'
+                                      : 'Atışı başlat ↗';
 
     const runBtn = document.createElement('button');
     runBtn.type = 'button';
     runBtn.className = 'sim-main-btn';
     runBtn.id = 'run-case';
-    runBtn.disabled = Boolean(effects.busy || effects.destroyed);
+    const allowWhenDestroyed = ['creator', 'supernova', 'dyson', 'galaxy', 'wormhole', 'surface'].includes(caseId);
+    runBtn.disabled = Boolean(busyAny || (effects.destroyed && !allowWhenDestroyed));
     runBtn.textContent = runLabel;
     runBtn.onclick = run;
     nodes.push(runBtn);
@@ -859,7 +1159,8 @@ export function createSimulator({
   }
 
   function run() {
-    if (launching || effects.busy || effects.destroyed) return;
+    const allowWhenDestroyed = ['creator', 'supernova', 'dyson', 'galaxy', 'wormhole', 'surface'].includes(caseId);
+    if (launching || effects.busy || cosmosFx?.isCollisionBusy?.() || (effects.destroyed && !allowWhenDestroyed)) return;
     if (!CASE_IDS.has(caseId)) return;
 
     const now = nowMs();
@@ -989,8 +1290,172 @@ export function createSimulator({
         return;
       }
 
+      if (caseId === 'defense') {
+        defenseSys?.setTarget(tgt);
+        const n = defenseSys?.deploy(defenseCount) || 0;
+        playSfx?.('reset');
+        title = n > 0 ? `${prof.name} Savunma Ağı Aktif 🛰` : 'Savunma Ağı Kapatıldı';
+        description = n > 0
+          ? `${n} otomatik lazerli savunma uydusu ve Uzay İstasyonu yörüngeye yerleşti. Şimdi Meteor Yağmuru başlatıp test edebilirsin!`
+          : 'Yörünge savunma uyduları devre dışı bırakıldı.';
+        banner(title);
+        logEvent('Yörünge Savunması', `${prof.name} · ${n} uydu`);
+        stats();
+        render();
+        return;
+      }
+
+      if (caseId === 'terraform') {
+        const tfId = targetId === 'mars' || targetId === 'venus' || targetId === 'earth' ? targetId : 'mars';
+        targetId = tfId;
+        select(tfId);
+        const res = terraformSys?.applyTerraform(tfId, terraformPct);
+        if (res) {
+          telTemp = res.temp;
+          telAtmo = res.atmo;
+          if (res.colonyPop !== null) {
+            initial = Math.max(initial, res.colonyPop);
+            survivors = res.colonyPop;
+          }
+          playSfx?.('reset');
+          title = tfId === 'earth' ? `Buzul Çağı · %${terraformPct} ❄️` : `${PLANET_PROFILES[tfId].name} Terraforming · %${terraformPct} 🌍`;
+          description = tfId === 'earth'
+            ? `Buzullar kutuplardan ekvatora yayıldı · Sıcaklık: ${res.temp}°C.`
+            : `Okyanuslar, yeşil kıtalar ve gece şehir ışıkları oluştu · Sıcaklık: ${res.temp}°C · Koloni: ${num(res.colonyPop)}.`;
+          banner(title);
+          logEvent(tfId === 'earth' ? 'Buzul Çağı' : 'Terraforming', `${PLANET_PROFILES[tfId].name} %${terraformPct}`);
+          stats();
+          render();
+        }
+        return;
+      }
+
+      if (caseId === 'dyson') {
+        select('sun');
+        const info = dysonSys?.setProgress(dysonPct);
+        if (info) {
+          playSfx?.('grb');
+          title = `Dyson Küresi · %${info.progress} (Kardashev ${info.kardashev})`;
+          description = `Güneş etrafında enerji kolektörleri kuruldu · Üretim: ${fmt(info.watts)} Watt.`;
+          banner(`DYSON KÜRESİ · %${info.progress} · TİP-${info.kardashev}`);
+          logEvent('Dyson Küresi', `%${info.progress} · Tip-${info.kardashev}`);
+          stats();
+          render();
+        }
+        return;
+      }
+
+      if (caseId === 'wormhole') {
+        const fromId = targetId === 'sun' ? 'earth' : targetId;
+        const toId = wormholeDest === fromId ? (fromId === 'saturn' ? 'earth' : 'saturn') : wormholeDest;
+        if (wormholeSys?.open(fromId, toId)) {
+          title = `Solucan Deliği Açıldı 🌀`;
+          description = `${PLANET_PROFILES[fromId].name} ⇄ ${PLANET_PROFILES[toId].name} arasında çift yönlü portal aktif. Serbest Uçuşta içine uç veya "Portaldan Geç"e bas!`;
+          banner(`SOLUCAN DELİĞİ · ${PLANET_PROFILES[fromId].name} ⇄ ${PLANET_PROFILES[toId].name}`);
+          logEvent('Solucan Deliği', `${PLANET_PROFILES[fromId].name} ⇄ ${PLANET_PROFILES[toId].name}`);
+          stats();
+          render();
+        }
+        return;
+      }
+
+      if (caseId === 'galaxy') {
+        galaxySys?.start();
+        title = 'Samanyolu × Andromeda Çarpışması 🌌';
+        description = '8.000 yıldızlı iki spiral galaksi birbirine girip dev gelgit kuyrukları oluşturarak birleşiyor.';
+        banner('GALAKSİ ÇARPIŞMASI · SAMANYOLU × ANDROMEDA');
+        logEvent('Galaksi Çarpışması', 'Samanyolu × Andromeda');
+        stats();
+        render();
+        return;
+      }
+
+      if (caseId === 'surface') {
+        if (surfaceSys?.enter(surfaceHost)) {
+          title = `${surfaceHost === 'mars' ? 'Mars' : 'Dünya'} Yüzey Gözlemi 🔭`;
+          description = 'Yüzeyden gökyüzüne bakıyorsun! Şimdi Kara Delik, Süpernova veya Meteor Yağmuru başlatıp gökyüzünü izleyebilirsin.';
+          banner(`YÜZEY MODU · ${surfaceHost === 'mars' ? 'MARS' : 'DÜNYA'} GÖKYÜZÜ`);
+          logEvent('Yüzey Modu', surfaceHost === 'mars' ? 'Mars' : 'Dünya');
+          stats();
+          render();
+        }
+        return;
+      }
+
+      if (caseId === 'creator') {
+        const entry = cosmosFx?.spawnCustomBody({
+          kind: creatorKind,
+          name: creatorKind === 'star' ? 'İkinci Yıldız' : 'Özel Gezegen',
+          size: creatorSize,
+          distance: creatorDist,
+          color: creatorColor,
+          hasRings: creatorRings,
+          hasAtmo: true
+        });
+        if (entry) {
+          playSfx?.('reset');
+          const label = creatorKind === 'star' ? 'Çift Yıldız Eklendi ⭐' : 'Yeni Gezegen Yörüngede 🪐';
+          title = label;
+          description = `Uzaklık: ${creatorDist} u · Boyut: ${creatorSize.toFixed(1)}× · Sistemdeki özel cisim: ${cosmosFx.getCustomBodyCount()}.`;
+          banner(label);
+          logEvent('Sistem Kurucu', `${creatorKind === 'star' ? 'Yıldız' : 'Gezegen'} (${creatorDist} u)`);
+          stats();
+          render();
+        }
+        return;
+      }
+
+      if (caseId === 'supernova') {
+        sunRunning = false;
+        select('sun');
+        title = 'Güneş Kararsızlaşıyor…';
+        description = 'Çekirdek çöküşü başladı! Kırmızı Dev şişmesinin ardından Süpernova patlayacak.';
+        banner('SÜPERNOVA · ÇEKİRDEK ÇÖKÜŞÜ BAŞLADI');
+        stats();
+        cosmosFx?.triggerSupernova(() => {
+          if (epoch !== runEpoch) return;
+          telTemp = 4800;
+          telAtmo = 0;
+          survivors = 0;
+          title = 'Süpernova Patladı · Pulsar Doğdu 🌟';
+          description = 'Güneş parçalandı; genişleyen renkli nebula dalgasının merkezinde hızla dönen ışınlı bir Pulsar (Nötron Yıldızı) kaldı.';
+          banner('SÜPERNOVA · MERKEZDE DÖNEN PULSAR OLUŞTU');
+          logEvent('Süpernova', 'Güneş → Pulsar (Nötron Yıldızı)');
+          stats();
+          render();
+        });
+        render();
+        return;
+      }
+
+      if (caseId === 'collision') {
+        if (!cosmosFx || cosmosFx.isCollisionBusy()) return;
+        const srcId = impactorId === targetId ? (targetId === 'mars' ? 'venus' : 'mars') : impactorId;
+        const srcName = PLANET_PROFILES[srcId]?.name || srcId;
+        title = `${srcName} → ${prof.name} Çarpışması`;
+        description = `${srcName} yörüngesinden kopup ${prof.name} üzerine doğru hızlanıyor!`;
+        banner(`GEZEGEN ÇARPIŞMASI · ${srcName.toUpperCase()} → ${prof.name.toUpperCase()}`);
+        stats();
+        cosmosFx.launchPlanetCollision(srcId, targetId, ({ survivor, destroyed }) => {
+          if (epoch !== runEpoch) return;
+          telTemp = 3400;
+          telAtmo = 0;
+          survivors = 0;
+          effects.setEnvironmentalHeat(0.88);
+          title = `${destroyed.name} Parçalandı · Enkaz Halkası Oluştu`;
+          description = `${destroyed.name} çarpışmada dağılarak ${survivor.name} etrafında dönen erimiş bir enkaz halkasına dönüştü.`;
+          banner(`ÇARPIŞMA · ${survivor.name} ETRAFINDA ENKAZ HALKASI OLUŞTU`);
+          logEvent('Gezegen Çarpışması', `${srcName} × ${prof.name}`);
+          stats();
+          render();
+        });
+        render();
+        return;
+      }
+
       if (caseId === 'grb') {
         sunRunning = false;
+        cosmosFx?.boostAurora(2.4);
         const safeDist = clampFinite(grbDist, 100, 6000, 1500);
         const safeShield = clampFinite(shieldPct, 0, 100, 40);
         grbDist = safeDist;
@@ -1129,6 +1594,13 @@ export function createSimulator({
     launching = false;
     experimentRun = false;
     effects.reset();
+    cosmosFx?.reset();
+    defenseSys?.reset();
+    terraformSys?.reset();
+    dysonSys?.reset();
+    wormholeSys?.reset();
+    galaxySys?.reset();
+    surfaceSys?.reset();
     restoreEnvironment();
     playSfx?.('reset');
     const prof = targetProfile();
@@ -1207,6 +1679,7 @@ export function createSimulator({
     isBodyCaptured: id => effects.isBodyCaptured(id),
     isBlackHoleActive: () => effects.isBlackHoleActive,
     getBlackHolePosition: out => effects.getBlackHolePosition(out),
+    getEffects: () => effects,
     update(dt) {
       const safeDt = clampFinite(dt, 0, 0.25, 0);
       effects.update(safeDt);
