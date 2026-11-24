@@ -87,7 +87,8 @@ export function createDysonSphere({ scene, sun, light, sunFill }) {
       return {
         progress,
         watts: p * 3.828e26,
-        kardashev: Number((1.0 + p * 1.0).toFixed(2))
+        kardashev: Number((1.0 + p * 1.0).toFixed(2)),
+        earthTempDrop: Math.round(p * 160)
       };
     },
     getProgress: () => progress,

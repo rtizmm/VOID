@@ -892,10 +892,21 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
 
   function capturePlanet(id, entry, gm, shatter) {
     if (capturedIds.has(id)) return;
+    if (!originalBodies.has(id)) {
+      originalBodies.set(id, {
+        pivot: entry.pivot,
+        localPos: entry.mesh.position.clone(),
+        baseScale: entry.mesh.scale.clone(),
+        baseRotZ: entry.mesh.rotation.z,
+        baseEmissive: entry.mesh.material?.emissive ? entry.mesh.material.emissive.clone() : null,
+        baseEmissiveIntensity: entry.mesh.material?.emissiveIntensity ?? 0
+      });
+    }
     const wPos = entry.mesh.getWorldPosition(new THREE.Vector3());
     scene.attach(entry.mesh);
 
     const isSun = id === 'sun';
+    const isStar = isSun || Boolean(entry.body.isStar);
     const toBh = tmpDir.copy(bhPos).sub(wPos);
     const dist = Math.max(1.8, toBh.length());
     const dirNorm = toBh.clone().multiplyScalar(1 / dist);
@@ -903,10 +914,10 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     const tiltAxis = tmpVec2.set((Math.random() - 0.5) * 0.35, 1, (Math.random() - 0.5) * 0.35).normalize();
     const tang = new THREE.Vector3().crossVectors(toBh, tiltAxis).normalize();
     // Immediate strong inward spiral kick so EVERY body visibly starts rushing toward the Black Hole right away!
-    const speedRatio = isSun ? 0.36 : 0.44 + Math.random() * 0.14;
-    const inwardKick = (2.4 + bhMassVal * 0.14) * (isSun ? 0.65 : 1.0);
+    const speedRatio = isStar ? 0.36 : 0.44 + Math.random() * 0.14;
+    const inwardKick = (2.4 + bhMassVal * 0.14) * (isStar ? 0.65 : 1.0);
     const initVel = tang.multiplyScalar(vKepler * speedRatio).addScaledVector(dirNorm, inwardKick);
-    const trail = createTrailRibbon(entry.body.color, isSun ? 104 : 84);
+    const trail = createTrailRibbon(entry.body.color, isStar ? 104 : 84);
     trailGroup.add(trail.line, trail.sparks);
 
     capturedIds.add(id);
@@ -921,6 +932,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       swallowed: false,
       isMoon: false,
       isSun,
+      isStar,
       isEarth: id === target.body.id,
       isRogue: false,
       colorHex: entry.body.color,
@@ -1255,8 +1267,9 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
 
     if (remaining === 0) {
       const doneCb = storm.onComplete;
+      const summary = { struck: storm.struck, intercepted: storm.intercepted || 0, total: storm.total };
       storm = null;
-      doneCb?.();
+      doneCb?.(summary);
     }
   }
 
@@ -1301,13 +1314,13 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
     const gm = 30 + bhMassVal * 3.1;
     const pullRadius = 26 + bhMassVal * 2.5;
 
-    // Dynamically pull in any planet or the Sun that enters the Black Hole's sphere of influence
+    // Dynamically pull in any planet, custom body, or star that enters the Black Hole's sphere of influence
     if (objects) {
       for (const [id, entry] of objects.entries()) {
         if (capturedIds.has(id)) continue;
         const wPos = entry.mesh.getWorldPosition(tmpVec);
         const d = wPos.distanceTo(bhPos);
-        if (id === 'sun') {
+        if (id === 'sun' || entry.body.isStar) {
           if (bhMassVal >= 18 || d < 28 + bhMassVal * 0.85) {
             capturePlanet(id, entry, gm, earthWillShatter);
           }
@@ -1336,8 +1349,8 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         tmpDir.multiplyScalar(invDist);
 
         // Relentless universal Black Hole pull: near + strong far-field attraction so the ENTIRE Solar System collapses in!
-        const farPull = (4.8 + bhMassVal * 0.30) * (item.isSun ? 0.72 : 1.0) * (0.45 + 0.55 / (1 + dist * 0.015));
-        const accel = (gm / (dist * dist + 1.15)) * (item.isSun ? 0.72 : 1.0) + farPull;
+        const farPull = (4.8 + bhMassVal * 0.30) * (item.isStar ? 0.72 : 1.0) * (0.45 + 0.55 / (1 + dist * 0.015));
+        const accel = (gm / (dist * dist + 1.15)) * (item.isStar ? 0.72 : 1.0) + farPull;
         item.vel.addScaledVector(tmpDir, accel * h);
 
         // Subtle frame-dragging swirl near the ergosphere + strong inward orbital decay
@@ -1357,36 +1370,38 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       dist = tmpDir.length();
       tmpDir.multiplyScalar(1 / Math.max(dist, 0.001));
 
-      // Stellar Plasma Siphon when the Sun is close to the Black Hole!
-      if (item.isSun && dist < 44) {
-        sunSiphonDrawn = true;
-        const siphonFrac = clamp01(1 - (dist - ehRadius) / 38);
-        item.drain = Math.min(0.62, (item.drain || 0) + dt * siphonFrac * (earthWillShatter ? 0.14 : 0.035));
-        siphonStream.visible = true;
-        tmpVec.copy(item.pos).lerp(bhPos, 0.5);
-        siphonStream.position.copy(tmpVec);
-        siphonStream.quaternion.setFromUnitVectors(upVec, tmpDir);
-        const beamW = 0.5 + siphonFrac * 1.6;
-        siphonStream.scale.set(beamW, Math.max(1, dist * 0.92), beamW);
-        siphonStream.material.opacity = (0.28 + siphonFrac * 0.45) * (0.85 + Math.sin(bhAge * 14) * 0.15);
+      // Stellar Plasma Siphon when the Sun or a custom Binary Star is close to the Black Hole!
+      if (item.isStar && dist < 44) {
+        if (!sunSiphonDrawn || item.isSun) {
+          sunSiphonDrawn = true;
+          const siphonFrac = clamp01(1 - (dist - ehRadius) / 38);
+          item.drain = Math.min(0.62, (item.drain || 0) + dt * siphonFrac * (earthWillShatter ? 0.14 : 0.035));
+          siphonStream.visible = true;
+          tmpVec.copy(item.pos).lerp(bhPos, 0.5);
+          siphonStream.position.copy(tmpVec);
+          siphonStream.quaternion.setFromUnitVectors(upVec, tmpDir);
+          const beamW = 0.5 + siphonFrac * 1.6;
+          siphonStream.scale.set(beamW, Math.max(1, dist * 0.92), beamW);
+          siphonStream.material.opacity = (0.28 + siphonFrac * 0.45) * (0.85 + Math.sin(bhAge * 14) * 0.15);
 
-        // Continuously rip blazing solar plasma sparks from Sun surface into the Black Hole
-        if (Math.random() < 0.75) {
-          tmpVec2.copy(item.pos).addScaledVector(tmpDir, item.baseScale.x * (1 - item.drain * 0.5) * 0.85);
-          tmpVec3.copy(tmpDir).multiplyScalar(5.5 + siphonFrac * 8.0);
-          tmpVec3.x += (Math.random() - 0.5) * 2.2;
-          tmpVec3.y += (Math.random() - 0.5) * 2.2;
-          tmpVec3.z += (Math.random() - 0.5) * 2.2;
-          emitSpark(tmpVec2, tmpVec3, Math.random() > 0.35 ? 0xffc864 : 0xff6e24, 1.15, true);
+          // Continuously rip blazing stellar plasma sparks from star surface into the Black Hole
+          if (Math.random() < 0.75) {
+            tmpVec2.copy(item.pos).addScaledVector(tmpDir, item.baseScale.x * (1 - item.drain * 0.5) * 0.85);
+            tmpVec3.copy(tmpDir).multiplyScalar(5.5 + siphonFrac * 8.0);
+            tmpVec3.x += (Math.random() - 0.5) * 2.2;
+            tmpVec3.y += (Math.random() - 0.5) * 2.2;
+            tmpVec3.z += (Math.random() - 0.5) * 2.2;
+            emitSpark(tmpVec2, tmpVec3, Math.random() > 0.35 ? 0xffc864 : 0xff6e24, 1.15, true);
+          }
         }
       }
 
       // Tidal stretching (Spaghettification!) as body enters tidal radius
-      const bodyTidal = item.isSun ? tidalRadius * 2.3 : tidalRadius;
+      const bodyTidal = item.isStar ? tidalRadius * 2.3 : tidalRadius;
       const prox = clamp01(1 - (dist - ehRadius) / Math.max(0.5, bodyTidal - ehRadius));
-      if (prox > 0.02 || (item.isSun && item.drain > 0.01)) {
-        const drainScale = item.isSun ? (1 - (item.drain || 0) * 0.55) : 1;
-        const stretch = 1 + Math.pow(prox, 1.7) * (item.lockedToSafeOrbit ? 0.55 : item.isSun ? 2.6 : 4.9);
+      if (prox > 0.02 || (item.isStar && item.drain > 0.01)) {
+        const drainScale = item.isStar ? (1 - (item.drain || 0) * 0.55) : 1;
+        const stretch = 1 + Math.pow(prox, 1.7) * (item.lockedToSafeOrbit ? 0.55 : item.isStar ? 2.6 : 4.9);
         const squeeze = 1 / Math.sqrt(stretch);
         item.mesh.quaternion.setFromUnitVectors(zAxis, tmpDir);
         item.mesh.scale.set(
@@ -1413,22 +1428,22 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       item.trail.push(item.pos, prox);
 
       // Swallowed at the Event Horizon!
-      const swallowDist = item.isSun ? ehRadius * 2.1 : ehRadius * 1.25;
+      const swallowDist = item.isStar ? ehRadius * 2.1 : ehRadius * 1.25;
       if (!item.lockedToSafeOrbit && dist <= swallowDist) {
         item.swallowed = true;
         item.mesh.visible = false;
         // Black Hole physically grows as it devours stars and planets!
-        bhGrowth = Math.min(2.2, bhGrowth + (item.isSun ? 0.55 : item.isRogue ? 0.02 : 0.12));
+        bhGrowth = Math.min(2.2, bhGrowth + (item.isStar ? 0.55 : item.isRogue ? 0.02 : 0.12));
 
-        const burstN = item.isSun ? 64 : item.isEarth ? 36 : 20;
+        const burstN = item.isStar ? 64 : item.isEarth ? 36 : 20;
         for (let k = 0; k < burstN; k++) {
           const ang = (k / burstN) * Math.PI * 2;
-          const spd = item.isSun ? 6.8 : 4.2;
-          tmpVec2.set(Math.cos(ang) * spd, (Math.random() - 0.5) * (item.isSun ? 4.4 : 2.4), Math.sin(ang) * spd);
-          emitSpark(item.pos, tmpVec2, item.isSun ? 0xffe08a : (k % 2 ? 0xffd28a : (item.colorHex || 0xff7b42)), 1.0 + Math.random() * 0.65, true);
+          const spd = item.isStar ? 6.8 : 4.2;
+          tmpVec2.set(Math.cos(ang) * spd, (Math.random() - 0.5) * (item.isStar ? 4.4 : 2.4), Math.sin(ang) * spd);
+          emitSpark(item.pos, tmpVec2, item.isStar ? 0xffe08a : (k % 2 ? 0xffd28a : (item.colorHex || 0xff7b42)), 1.0 + Math.random() * 0.65, true);
         }
-        addShake(item.isSun ? 1.25 : item.isEarth ? 0.95 : 0.34, item.isSun ? 1.8 : item.isEarth ? 1.4 : 0.6);
-        pulseBloom(item.isSun ? 2.6 : item.isEarth ? 2.0 : 1.35);
+        addShake(item.isStar ? 1.25 : item.isEarth ? 0.95 : 0.34, item.isStar ? 1.8 : item.isEarth ? 1.4 : 0.6);
+        pulseBloom(item.isStar ? 2.6 : item.isEarth ? 2.0 : 1.35);
 
         if (item.isSun) {
           sunSwallowed = true;
@@ -1517,7 +1532,7 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
       tail.material.color.setHex(isFastExotic ? col : 0xffaa5c);
       tail.scale.set(isFastExotic ? 1.1 : 0.85, isFastExotic ? 2.4 : 1.0, isFastExotic ? 1.1 : 0.85);
     },
-    launchStorm(count = 9, onStrike, onComplete, intensity = 0.55) {
+    launchStorm(count = 9, onStrike, onComplete, intensity = 0.55, onIntercept = null) {
       clearStorm();
       sphere.getWorldPosition(center);
       const total = Math.max(1, Math.min(24, Math.round(Number(count) || 9)));
@@ -1579,10 +1594,12 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         meteors,
         elapsed: 0,
         struck: 0,
+        intercepted: 0,
         total,
         intensity: clampedInt,
         onStrike,
-        onComplete
+        onComplete,
+        onIntercept
       };
     },
     getCraterCount() {
@@ -1633,12 +1650,55 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         scarRoot.remove(mark);
       }
     },
+    registerBody(id, entry) {
+      if (!id || !entry) return;
+      originalBodies.set(id, {
+        pivot: entry.pivot,
+        localPos: entry.mesh.position.clone(),
+        baseScale: entry.mesh.scale.clone(),
+        baseRotZ: entry.mesh.rotation.z,
+        baseEmissive: entry.mesh.material?.emissive ? entry.mesh.material.emissive.clone() : null,
+        baseEmissiveIntensity: entry.mesh.material?.emissiveIntensity ?? 0
+      });
+    },
+    updateBodySnapshot(id, entry) {
+      if (!id || !entry) return;
+      const orig = originalBodies.get(id);
+      if (!orig) {
+        originalBodies.set(id, {
+          pivot: entry.pivot,
+          localPos: entry.mesh.position.clone(),
+          baseScale: entry.mesh.scale.clone(),
+          baseRotZ: entry.mesh.rotation.z,
+          baseEmissive: entry.mesh.material?.emissive ? entry.mesh.material.emissive.clone() : null,
+          baseEmissiveIntensity: entry.mesh.material?.emissiveIntensity ?? 0
+        });
+        return;
+      }
+      orig.localPos.set(entry.body.distance, 0, 0);
+      orig.baseScale.setScalar(entry.body.size);
+      orig.baseRotZ = entry.mesh.rotation.z;
+    },
+    unregisterBody(id) {
+      originalBodies.delete(id);
+      capturedIds.delete(id);
+      const idx = capturedBodies.findIndex(b => b.id === id);
+      if (idx !== -1) {
+        const item = capturedBodies[idx];
+        if (item.trail) {
+          trailGroup.remove(item.trail.line, item.trail.sparks);
+          item.trail.dispose();
+        }
+        capturedBodies.splice(idx, 1);
+      }
+    },
     interceptNextMeteor() {
       if (!storm) return null;
       for (const m of storm.meteors) {
         if (!m.hit && m.launched && m.mesh && m.flightTime > m.duration * 0.18 && m.flightTime < m.duration * 0.92) {
           const hitPos = m.mesh.position.clone();
           m.hit = true;
+          storm.intercepted = (storm.intercepted || 0) + 1;
           stormGroup.remove(m.mesh, m.tail);
           if (m.trail) {
             trailGroup.remove(m.trail.line, m.trail.sparks);
@@ -1647,14 +1707,35 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
           m.mesh = null;
           m.tail = null;
           m.trail = null;
-          for (let k = 0; k < 10; k++) {
-            tmpVec3.set((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4);
+          for (let k = 0; k < 12; k++) {
+            tmpVec3.set((Math.random() - 0.5) * 4.2, (Math.random() - 0.5) * 4.2, (Math.random() - 0.5) * 4.2);
             emitSpark(hitPos, tmpVec3, 0x62ffbe, 0.55, false);
           }
+          storm.onIntercept?.(storm.intercepted, storm.struck, storm.total);
           return hitPos;
         }
       }
       return null;
+    },
+    interceptActiveFlight(satCount = 0) {
+      if (!flight || flight.kind !== 'asteroid' || satCount < 4) return null;
+      const dur = flight.duration || 2.35;
+      if (flight.time < dur * 0.35 || flight.time > dur * 0.92) return null;
+      // Defense network intercepts small/medium asteroids (damage < 0.52 ~ up to ~1.5 km); planet-killers overwhelm lasers!
+      if (flight.r && flight.r.damage >= 0.52) return null;
+      const hitPos = rock.position.clone();
+      const cb = flight.opts?.onIntercept;
+      flight = null;
+      rock.visible = false;
+      tail.visible = false;
+      for (let k = 0; k < 20; k++) {
+        tmpVec3.set((Math.random() - 0.5) * 5.2, (Math.random() - 0.5) * 5.2, (Math.random() - 0.5) * 5.2);
+        emitSpark(hitPos, tmpVec3, k % 2 ? 0x62ffbe : 0xffe48f, 0.65, false);
+      }
+      addShake(0.12, 0.3);
+      pulseBloom(0.95);
+      cb?.();
+      return hitPos;
     },
     spawnBlackHole(massMultiplier, shatter, onSwallow = null) {
       bhActive = true;
