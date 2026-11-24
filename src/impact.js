@@ -1633,6 +1633,29 @@ export function createImpactEffects(scene, earth, camera, extras = {}) {
         scarRoot.remove(mark);
       }
     },
+    interceptNextMeteor() {
+      if (!storm) return null;
+      for (const m of storm.meteors) {
+        if (!m.hit && m.launched && m.mesh && m.flightTime > m.duration * 0.18 && m.flightTime < m.duration * 0.92) {
+          const hitPos = m.mesh.position.clone();
+          m.hit = true;
+          stormGroup.remove(m.mesh, m.tail);
+          if (m.trail) {
+            trailGroup.remove(m.trail.line, m.trail.sparks);
+            m.trail.dispose();
+          }
+          m.mesh = null;
+          m.tail = null;
+          m.trail = null;
+          for (let k = 0; k < 10; k++) {
+            tmpVec3.set((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4);
+            emitSpark(hitPos, tmpVec3, 0x62ffbe, 0.55, false);
+          }
+          return hitPos;
+        }
+      }
+      return null;
+    },
     spawnBlackHole(massMultiplier, shatter, onSwallow = null) {
       bhActive = true;
       bhMassVal = massMultiplier;

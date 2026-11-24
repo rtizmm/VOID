@@ -7,6 +7,14 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { bodies } from './data.js';
 import { createSimulator } from './sim.js';
 import { createSatelliteSystem } from './satellites.js';
+import { createCosmosExtras } from './cosmos-fx.js';
+import { createCockpitAndRecorder } from './cockpit.js';
+import { createOrbitalDefense } from './defense.js';
+import { createTerraformSystem } from './terraform.js';
+import { createDysonSphere } from './dyson.js';
+import { createWormholeSystem } from './wormhole.js';
+import { createGalaxyCollision } from './galaxy.js';
+import { createSurfaceView } from './surface-view.js';
 
 const $=selector=>document.querySelector(selector);
 const canvas=$('#space');
@@ -191,6 +199,23 @@ function texture(body){
     for(let i=0;i<110;i++){ctx.beginPath();ctx.ellipse(rng()*768,rng()*384,4+rng()*40,1+rng()*5,-.2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.18)';ctx.fill()}
   }
   if(body.id==='mars'){for(let i=0;i<55;i++){ctx.fillStyle='rgba(77,38,26,.18)';ctx.beginPath();ctx.arc(rng()*768,rng()*384,2+rng()*22,0,Math.PI*2);ctx.fill()}}
+  if(body.id==='jupiter'){
+    // Rich equatorial cloud bands + iconic Great Red Spot anticyclone
+    const bands=[[44,18,'rgba(166,112,74,.45)'],[92,26,'rgba(240,224,198,.38)'],[142,22,'rgba(148,88,58,.48)'],[196,28,'rgba(232,208,176,.42)'],[252,26,'rgba(164,96,62,.52)'],[305,20,'rgba(220,196,166,.35)']];
+    for(const [y,h,col] of bands){ctx.fillStyle=col;ctx.fillRect(0,y,768,h)}
+    // Great Red Spot (southern tropical storm vortex)
+    ctx.save();ctx.translate(460,244);ctx.rotate(-0.08);
+    const spot=ctx.createRadialGradient(0,0,4,0,0,44);
+    spot.addColorStop(0,'rgba(218,78,42,.92)');
+    spot.addColorStop(.45,'rgba(186,62,36,.78)');
+    spot.addColorStop(.78,'rgba(232,148,96,.48)');
+    spot.addColorStop(1,'rgba(200,145,105,0)');
+    ctx.fillStyle=spot;ctx.scale(1.55,.82);
+    ctx.beginPath();ctx.arc(0,0,44,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(255,212,174,.38)';ctx.lineWidth=2.5;
+    ctx.beginPath();ctx.ellipse(0,0,26,18,0,0,Math.PI*2);ctx.stroke();
+    ctx.restore();
+  }
   const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=4;return tex;
 }
 function glowTexture(){
@@ -568,7 +593,19 @@ function select(id,animate=true){
 $('#explore').onclick=()=>select(selected);
 $('#reset').onclick=()=>{selected='sun';flyTo(new THREE.Vector3(97,68,120),new THREE.Vector3(0,0,0),1.5);if(innerWidth<=760)setPanel(false)};
 $('#pause').onclick=()=>{paused=!paused;$('#pause').textContent=paused?'▶ DEVAM':'Ⅱ DURAKLAT'};
-$('#speed').oninput=e=>{const v=Number(e.target.value);speed=Number.isFinite(v)?Math.max(0,Math.min(5,v)):1;$('#speed-label').textContent=speed.toFixed(1)+'×'};
+$('#speed').oninput=e=>{const v=Number(e.target.value);speed=Number.isFinite(v)?Math.max(0.05,Math.min(5,v)):1;$('#speed-label').textContent=speed.toFixed(speed<0.5?2:1)+'×';const sm=$('#slowmo');if(sm)sm.setAttribute('aria-pressed',String(speed<=0.15))};
+const slowMoBtn=$('#slowmo');
+if(slowMoBtn){
+  let savedNormalSpeed=1;
+  slowMoBtn.onclick=()=>{
+    if(speed<=0.15){speed=savedNormalSpeed||1}
+    else{savedNormalSpeed=speed;speed=0.1}
+    if($('#speed'))$('#speed').value=String(speed);
+    $('#speed-label').textContent=speed.toFixed(speed<0.5?2:1)+'×';
+    slowMoBtn.setAttribute('aria-pressed',String(speed<=0.15));
+    notify(speed<=0.15?'SİNEMATİK AĞIR ÇEKİM (0.1×)':'NORMAL ZAMAN AKIŞI');
+  };
+}
 function renderScene(){
   if(composer)composer.render();
   else renderer.render(scene,camera);
@@ -640,7 +677,7 @@ canvas.addEventListener('pointermove',e=>{
   camera.rotation.order='YXZ';camera.rotation.set(pitch,yaw,0,'YXZ');
 });
 controls.addEventListener('start',()=>{transition=null});
-addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;if(e.code==='Space'&&document.activeElement.tagName==='BUTTON')return;if(e.code==='KeyF'){select(selected);return}if(e.code==='Escape'){setPanel(false);return}keys.add(e.code);if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault()});
+addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;if(e.code==='Space'&&document.activeElement.tagName==='BUTTON')return;if(e.code==='KeyF'){select(selected);return}if(e.code==='KeyV'&&mode==='cockpit'){cockpitCtrl.toggleWarp();return}if(e.code==='Escape'){setPanel(false);return}keys.add(e.code);if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault()});
 addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());
 document.querySelectorAll('[data-key]').forEach(b=>{b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture(e.pointerId);keys.add(b.dataset.key)};b.onpointerup=b.onpointercancel=b.onlostpointercapture=()=>keys.delete(b.dataset.key)});
 let audioContext=null,audioNodes=[],sfxNoiseBuf=null;
@@ -816,7 +853,7 @@ function frame(now){
   if(!paused){
     objects.get(selected).mesh.getWorldPosition(prev);
     for(const e of objects.values()){
-      if(simulator.isBodyCaptured(e.body.id))continue;
+      if(simulator.isBodyCaptured(e.body.id)||cosmosFx.isBodyInCollision(e.body.id))continue;
       e.mesh.rotation.y+=e.body.spin*dt*60*speed;
       if(e.body.orbit && !(e.body.id==='earth'&&simulator.isSunGone()))e.pivot.rotation.y+=e.body.orbit*dt*speed*.30;
     }
@@ -859,19 +896,30 @@ function frame(now){
     controls.target.lerpVectors(transition.target,transition.look,t);
     if(t>=1)transition=null;
   }
+  let curFlightSpeed=20,moveLen=0;
   if(mode==='orbit'){controls.update()}
   else{
     const rawFlight=Number(flightSpeedEl?.value);
-    const flightSpeed=Number.isFinite(rawFlight)?Math.max(2,Math.min(100,rawFlight)):20;
-    const travel=flightSpeed*(keys.has('ShiftLeft')||keys.has('ShiftRight')?4:1)*dt;
+    curFlightSpeed=Number.isFinite(rawFlight)?Math.max(2,Math.min(100,rawFlight)):20;
+    const travel=curFlightSpeed*(keys.has('ShiftLeft')||keys.has('ShiftRight')?4:1)*dt;
     flightDir.set(0,0,0);
     if(keys.has('KeyW'))flightDir.z-=1;if(keys.has('KeyS'))flightDir.z+=1;
     if(keys.has('KeyA'))flightDir.x-=1;if(keys.has('KeyD'))flightDir.x+=1;
     if(keys.has('KeyQ'))flightDir.y-=1;if(keys.has('KeyE'))flightDir.y+=1;
-    if(flightDir.lengthSq()){flightDir.normalize().applyQuaternion(camera.quaternion).multiplyScalar(travel);camera.position.add(flightDir)}
+    moveLen=flightDir.lengthSq();
+    if(moveLen){flightDir.normalize().applyQuaternion(camera.quaternion).multiplyScalar(travel);camera.position.add(flightDir)}
   }
+  cockpitCtrl.update(dt,{mode,flightSpeed:curFlightSpeed,moveLen});
   if(++counter%15===0&&coordsEl)coordsEl.textContent='KAMERA / '+camera.position.x.toFixed(1)+' · '+camera.position.y.toFixed(1)+' · '+camera.position.z.toFixed(1);
-  simulator.update(paused?0:dt);
+  const simDt=paused?0:dt*(speed<0.5?speed:1);
+  simulator.update(simDt);
+  cosmosFx.update(simDt,{paused,speed});
+  defenseSys.update(simDt,{paused,speed,effects:simulator.getEffects?.()});
+  terraformSys.update(simDt);
+  dysonSys.update(simDt,{paused,speed});
+  wormholeSys.update(dt,{mode});
+  galaxySys.update(simDt,{paused,speed});
+  surfaceSys.update();
 
   satUpdateState.paused=paused;
   satUpdateState.speed=speed;
@@ -906,7 +954,16 @@ function resize(){
 }
 addEventListener('resize',resize);
 select('earth',true);
-const simulator=createSimulator({scene,camera,controls,objects,moon,ambient,light,sunFill,flyTo,select,notify,setPanel,addShake,pulseBloom,playSfx});
+const cosmosFx=createCosmosExtras({scene,objects,sun:objects.get('sun'),earth:earthEntry,light,sunFill,ambient,addShake,pulseBloom,playSfx,textureFactory:texture});
+const cockpitCtrl=createCockpitAndRecorder({scene,camera,canvas,objects,notify,addShake});
+const defenseSys=createOrbitalDefense({scene,earth:earthEntry,playSfx,pulseBloom});
+const terraformSys=createTerraformSystem({objects,sun:objects.get('sun')});
+const dysonSys=createDysonSphere({scene,sun:objects.get('sun'),light,sunFill});
+const wormholeSys=createWormholeSystem({scene,objects,camera,flyTo,notify,addShake,pulseBloom,playSfx});
+const galaxySys=createGalaxyCollision({scene,flyTo,notify,pulseBloom});
+const surfaceSys=createSurfaceView({scene,objects,camera,controls,notify});
+const megaSystems={defenseSys,terraformSys,dysonSys,wormholeSys,galaxySys,surfaceSys};
+const simulator=createSimulator({scene,camera,controls,objects,moon,ambient,light,sunFill,flyTo,select,notify,setPanel,addShake,pulseBloom,playSfx,cosmosFx,megaSystems});
 const satUpdateState={paused:false,speed:1,gravity:100,camera,isBodyCaptured:id=>simulator.isBodyCaptured(id),sunGone:false};
 requestAnimationFrame(frame);
 setTimeout(()=>$('#loading').classList.add('done'),reduceMotion?50:350);

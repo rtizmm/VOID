@@ -810,3 +810,119 @@ footer input {
     animation: none !important;
   }
 }
+
+/* === VOID 3.0 Cockpit HUD, Entry Heat Vignette, Video Recorder & Slow-Motion === */
+#record-video.recording {
+  background: rgba(235, 58, 72, 0.24);
+  border-color: rgba(255, 92, 108, 0.65);
+  color: #ffd5da;
+  animation: recPulse 1.1s ease-in-out infinite;
+}
+@keyframes recPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 82, 98, 0.35); }
+  50% { box-shadow: 0 0 14px 2px rgba(255, 82, 98, 0.55); }
+}
+#slowmo[aria-pressed='true'] {
+  background: var(--exotic-soft);
+  border-color: var(--exotic-border);
+  color: var(--exotic);
+}
+#cockpit-hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.hud-reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(132, 224, 255, 0.36);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 22px rgba(100, 220, 255, 0.14);
+}
+.hud-reticle::before,
+.hud-reticle::after {
+  content: '';
+  position: absolute;
+  background: rgba(132, 224, 255, 0.45);
+}
+.hud-reticle::before { width: 16px; height: 1px; left: -22px; box-shadow: 86px 0 0 rgba(132, 224, 255, 0.45); }
+.hud-reticle::after { width: 1px; height: 16px; top: -22px; box-shadow: 0 86px 0 rgba(132, 224, 255, 0.45); }
+.hud-reticle i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #8eeeff;
+}
+.hud-readout {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 18px;
+  background: var(--panel);
+  border: 1px solid var(--exotic-border);
+  border-radius: 999px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--panel-shadow);
+  pointer-events: auto;
+}
+.hud-readout > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+}
+.hud-readout strong {
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  color: #dff5ff;
+  font-variant-numeric: tabular-nums;
+}
+#warp-toggle {
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--exotic);
+  background: var(--exotic-soft);
+  border-color: var(--exotic-border);
+}
+#warp-toggle[aria-pressed='true'] {
+  background: linear-gradient(135deg, rgba(84, 212, 255, 0.35), rgba(162, 110, 255, 0.38));
+  border-color: #9befff;
+  color: #ffffff;
+  box-shadow: 0 0 18px rgba(102, 224, 255, 0.42);
+}
+#entry-heat {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 0.16s linear;
+  background: radial-gradient(circle at 50% 50%, transparent 48%, rgba(255, 118, 36, 0.42) 84%, rgba(255, 62, 18, 0.72) 100%);
+}
+@media (max-width: 760px) {
+  .hud-readout {
+    bottom: 114px;
+    gap: 10px;
+    padding: 8px 12px;
+    max-width: calc(100vw - 24px);
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 16px;
+  }
+}
