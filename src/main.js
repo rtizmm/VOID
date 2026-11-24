@@ -581,7 +581,9 @@ function select(id,animate=true){
   document.querySelectorAll('.planet-item').forEach(el=>el.classList.toggle('active',el.dataset.id===id));
   $('#title').textContent=$('#detail-title').textContent=b.name;
   $('#subtitle').textContent=b.subtitle;$('#category').textContent=b.category;
-  $('#description').textContent=b.description;$('#index').textContent=String(bodies.indexOf(b)+1).padStart(2,'0')+' — 09';
+  $('#description').textContent=b.description;
+  const bodyIdx=bodies.indexOf(b);
+  $('#index').textContent=bodyIdx>=0?String(bodyIdx+1).padStart(2,'0')+' — 09':'ÖZEL · '+b.id.toUpperCase();
   for(const key of ['diameter','temp','moons','period'])$('#'+key).textContent=b[key];
   if(animate){
     const destination=entry.mesh.getWorldPosition(new THREE.Vector3());
@@ -850,6 +852,7 @@ function frame(now){
     asteroidBeltGroup.position.set(0,0,0);asteroidBeltGroup.scale.setScalar(1);asteroidBeltGroup.visible=true;
     kuiperBelt.position.set(0,0,0);kuiperBelt.scale.setScalar(1);kuiperBelt.visible=true;
   }
+  if(!objects.has(selected))selected='earth';
   if(!paused){
     objects.get(selected).mesh.getWorldPosition(prev);
     for(const e of objects.values()){
@@ -885,7 +888,7 @@ function frame(now){
       kuiperBelt.rotation.y+=dt*.0024*speed;
     }
     objects.get(selected).mesh.getWorldPosition(nextPos);
-    if(mode==='orbit'&&!transition&&selected!=='sun'&&!bhOn){
+    if(mode==='orbit'&&!transition&&selected!=='sun'&&!bhOn&&!surfaceSys.isActive()){
       nextPos.sub(prev);controls.target.add(nextPos);camera.position.add(nextPos);
     }
   }
@@ -954,7 +957,7 @@ function resize(){
 }
 addEventListener('resize',resize);
 select('earth',true);
-const cosmosFx=createCosmosExtras({scene,objects,sun:objects.get('sun'),earth:earthEntry,light,sunFill,ambient,addShake,pulseBloom,playSfx,textureFactory:texture});
+const cosmosFx=createCosmosExtras({scene,objects,pickables,sun:objects.get('sun'),earth:earthEntry,light,sunFill,ambient,addShake,pulseBloom,playSfx,textureFactory:texture});
 const cockpitCtrl=createCockpitAndRecorder({scene,camera,canvas,objects,notify,addShake});
 const defenseSys=createOrbitalDefense({scene,earth:earthEntry,playSfx,pulseBloom});
 const terraformSys=createTerraformSystem({objects,sun:objects.get('sun')});

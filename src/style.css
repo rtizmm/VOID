@@ -915,6 +915,67 @@ footer input {
   transition: opacity 0.16s linear;
   background: radial-gradient(circle at 50% 50%, transparent 48%, rgba(255, 118, 36, 0.42) 84%, rgba(255, 62, 18, 0.72) 100%);
 }
+.sim-text-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 13, 24, 0.75);
+  color: #e9f2fc;
+  font-size: 12px;
+  outline: none;
+}
+.sim-text-input:focus {
+  border-color: var(--line-accent);
+  box-shadow: 0 0 0 2px rgba(187, 214, 177, 0.16);
+}
+.custom-body-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.custom-body-card {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.custom-body-card.active-target {
+  border-color: var(--line-accent);
+  background: rgba(187, 214, 177, 0.08);
+}
+.custom-body-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+}
+.custom-body-meta {
+  font-size: 10px;
+  color: var(--muted);
+}
+.custom-body-actions {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.custom-body-actions button {
+  padding: 5px 8px;
+  font-size: 10.5px;
+  border-radius: 7px;
+}
+.custom-body-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
 @media (max-width: 760px) {
   .hud-readout {
     bottom: 114px;

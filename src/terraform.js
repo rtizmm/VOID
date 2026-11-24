@@ -120,7 +120,7 @@ export function createTerraformSystem({ objects, sun }) {
   const tmpSun = new THREE.Vector3();
 
   return {
-    applyTerraform(planetId, percent) {
+    applyTerraform(planetId, percent, baseProfile = null) {
       const p = Math.max(0, Math.min(100, Number(percent) || 0)) / 100;
       if (planetId === 'earth') {
         state.earthIce = p;
@@ -130,37 +130,42 @@ export function createTerraformSystem({ objects, sun }) {
           rec.mesh.visible = p > 0.005;
         }
         return {
-          temp: Math.round(15 - p * 73),
-          atmo: Math.round(100 - p * 12),
+          temp: Math.round(15 - p * 93),
+          atmo: Math.round(100 - p * 15),
           colonyPop: null
         };
       }
-      if (planetId === 'mars' || planetId === 'venus') {
+      const entry = objects.get(planetId);
+      if (planetId === 'mars' || planetId === 'venus' || (entry?.body?.isCustom && !entry?.body?.isStar)) {
         state[planetId] = p;
         const rec = ensureOverlay(planetId, false);
         if (rec) {
           rec.mat.uniforms.uProgress.value = p;
           rec.mesh.visible = p > 0.005;
         }
-        const baseTemp = planetId === 'mars' ? -65 : 464;
-        const targetTemp = planetId === 'mars' ? 16 : 22;
-        const baseAtmo = planetId === 'mars' ? 12 : 100;
+        const baseTemp = planetId === 'mars' ? -65 : planetId === 'venus' ? 464 : (baseProfile?.temp ?? -40);
+        const targetTemp = planetId === 'mars' ? 16 : planetId === 'venus' ? 22 : 18;
+        const baseAtmo = planetId === 'mars' ? 12 : planetId === 'venus' ? 100 : (baseProfile?.atmo ?? 40);
+        const maxPop = planetId === 'mars' ? 2.4e9 : planetId === 'venus' ? 1.6e9 : 2.0e9;
         return {
           temp: Math.round(baseTemp + (targetTemp - baseTemp) * p),
           atmo: Math.round(baseAtmo + (98 - baseAtmo) * p),
-          colonyPop: Math.round(p * (planetId === 'mars' ? 2.4e9 : 1.6e9))
+          colonyPop: Math.round(p * maxPop)
         };
       }
       return null;
     },
     getState: () => ({ ...state }),
     reset() {
-      state.mars = 0;
-      state.venus = 0;
-      state.earthIce = 0;
-      for (const rec of overlays.values()) {
+      for (const k of Object.keys(state)) state[k] = 0;
+      for (const [key, rec] of overlays.entries()) {
         rec.mat.uniforms.uProgress.value = 0;
         rec.mesh.visible = false;
+        if (key !== 'earthIce' && !objects.has(key)) {
+          rec.mesh.geometry?.dispose();
+          rec.mat?.dispose();
+          overlays.delete(key);
+        }
       }
     },
     update(dt) {

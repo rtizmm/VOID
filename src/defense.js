@@ -158,12 +158,12 @@ export function createOrbitalDefense({ scene, earth, playSfx = () => {}, pulseBl
         }
       }
 
-      // Auto-intercept incoming storm meteors via effects.interceptNextMeteor()
-      if (!paused && effects?.interceptNextMeteor && satNodes.length > 0) {
+      // Auto-intercept incoming storm meteors AND small/medium asteroids via defense lasers
+      if (!paused && effects && satNodes.length > 0) {
         fireCooldown = Math.max(0, fireCooldown - dt);
         const interval = Math.max(0.16, 0.72 - satCount * 0.065);
         if (fireCooldown <= 0) {
-          const hitPos = effects.interceptNextMeteor();
+          const hitPos = effects.interceptNextMeteor?.() || effects.interceptActiveFlight?.(satCount);
           if (hitPos) {
             const shooter = satNodes[intercepted % satNodes.length];
             shooter.mesh.getWorldPosition(satWorld);

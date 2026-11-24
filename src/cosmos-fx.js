@@ -235,6 +235,7 @@ function createSupernovaShellMaterial() {
 export function createCosmosExtras({
   scene,
   objects,
+  pickables = [],
   sun,
   earth,
   light,
@@ -359,19 +360,36 @@ export function createCosmosExtras({
     debrisRings.push({ hostMesh, ringGroup, dustRing, inst, chunkGeo, chunkMat });
   }
 
-  // === CUSTOM CREATOR BODIES (PLANETS & BINARY STARS) ===
+  // === CUSTOM CREATOR BODIES (PLANETS & BINARY STARS — FIRST-CLASS SOLAR SYSTEM CITIZENS!) ===
   const customGroup = new THREE.Group();
   scene.add(customGroup);
   const customBodies = [];
+  let customSeq = 0;
 
-  function spawnCustomBody({ kind = 'planet', name = 'Yeni Dünya', size = 1.3, distance = 35, color = 0x56c8ff, hasRings = true, hasAtmo = true }) {
+  function spawnCustomBody({
+    kind = 'planet',
+    name = '',
+    size = 1.3,
+    distance = 35,
+    color = 0x56c8ff,
+    hasRings = true,
+    hasAtmo = true,
+    orbitMult = 1.0,
+    temp = null,
+    pop = 0
+  }) {
+    customSeq++;
+    const id = `custom-${customSeq}`;
     const safeSize = Math.max(0.35, Math.min(kind === 'star' ? 6.5 : 4.2, Number(size) || 1.3));
     const safeDist = Math.max(10, Math.min(105, Number(distance) || 35));
+    const safeOrbitMult = Math.max(0.1, Math.min(4.0, Number(orbitMult) || 1.0));
     const colHex = typeof color === 'string' ? parseInt(color.replace('#', ''), 16) || 0x56c8ff : color;
+    const displayName = (name && String(name).trim()) || (kind === 'star' ? `Yıldız #${customSeq}` : `Gezegen #${customSeq}`);
+    const baseTemp = Number.isFinite(Number(temp)) ? Math.round(Number(temp)) : kind === 'star' ? 6200 : Math.round(280 / Math.sqrt(safeDist / 10) - 180);
 
     const pivot = new THREE.Group();
     pivot.rotation.y = Math.random() * Math.PI * 2;
-    pivot.rotation.x = (Math.random() - 0.5) * 0.12;
+    pivot.rotation.x = (Math.random() - 0.5) * 0.14;
     customGroup.add(pivot);
 
     // Orbit ring
@@ -396,14 +414,16 @@ export function createCosmosExtras({
     if (kind === 'star') {
       meshMat = new THREE.MeshBasicMaterial({ color: colHex });
     } else {
-      const tex = textureFactory ? textureFactory({ id: 'custom-' + customBodies.length, color: colHex }) : null;
+      const tex = textureFactory ? textureFactory({ id, color: colHex }) : null;
       meshMat = new THREE.MeshStandardMaterial({ map: tex, color: tex ? 0xffffff : colHex, roughness: 0.92, metalness: 0.04 });
     }
     const mesh = new THREE.Mesh(meshGeo, meshMat);
     mesh.scale.setScalar(safeSize);
     mesh.position.x = safeDist;
+    mesh.userData.id = id;
     pivot.add(mesh);
 
+    let ringMesh = null;
     if (kind === 'star') {
       const starLight = new THREE.PointLight(colHex, 1400, 260, 1.3);
       mesh.add(starLight);
@@ -411,6 +431,7 @@ export function createCosmosExtras({
         new THREE.SphereGeometry(1.24, 24, 16),
         new THREE.MeshBasicMaterial({ color: colHex, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false })
       );
+      glowMesh.raycast = () => {};
       mesh.add(glowMesh);
     } else {
       if (hasAtmo) {
@@ -426,42 +447,160 @@ export function createCosmosExtras({
             blending: THREE.AdditiveBlending
           })
         );
+        atmoMesh.raycast = () => {};
         mesh.add(atmoMesh);
       }
-      if (hasRings) {
-        const ringMesh = new THREE.Mesh(
-          new THREE.RingGeometry(1.32, 2.15, 72),
-          new THREE.MeshStandardMaterial({
-            color: colHex,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.52,
-            roughness: 0.95,
-            depthWrite: false
-          })
-        );
-        ringMesh.rotation.x = -Math.PI / 2;
-        mesh.rotation.z = 0.28;
-        mesh.add(ringMesh);
-      }
+      ringMesh = new THREE.Mesh(
+        new THREE.RingGeometry(1.32, 2.15, 72),
+        new THREE.MeshStandardMaterial({
+          color: colHex,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.52,
+          roughness: 0.95,
+          depthWrite: false
+        })
+      );
+      ringMesh.rotation.x = -Math.PI / 2;
+      ringMesh.raycast = () => {};
+      ringMesh.visible = Boolean(hasRings);
+      mesh.rotation.z = hasRings ? 0.28 : 0;
+      mesh.add(ringMesh);
     }
 
-    const orbitSpeed = (kind === 'star' ? 0.008 : 0.012) * Math.sqrt(25 / safeDist);
-    const entry = { kind, name, pivot, mesh, orbitLine, orbitSpeed, spin: kind === 'star' ? 0.004 : 0.012 };
-    customBodies.push(entry);
-    return entry;
+    const baseOrbit = (kind === 'star' ? 0.008 : 0.012) * Math.sqrt(25 / safeDist);
+    const orbit = baseOrbit * safeOrbitMult;
+    const body = {
+      id,
+      name: displayName,
+      category: kind === 'star' ? 'ÖZEL YILDIZ' : 'ÖZEL GEZEGEN',
+      icon: kind === 'star' ? '⭐' : '🪐',
+      color: colHex,
+      size: safeSize,
+      distance: safeDist,
+      orbit,
+      spin: kind === 'star' ? 0.004 : 0.012,
+      subtitle: kind === 'star' ? 'Kullanıcı yapımı yoldaş yıldız' : 'Kullanıcı yapımı gezegen',
+      diameter: `${Math.round(safeSize * 12000).toLocaleString('tr-TR')} km`,
+      temp: `${baseTemp}°C`,
+      moons: '0',
+      period: `${Math.round(safeDist * 14)} gün`,
+      description: 'Sistem Kurucu ile oluşturulan ve tüm fizik / kara delik olaylarına katılan özel gök cismi.',
+      isCustom: true,
+      isStar: kind === 'star'
+    };
+
+    const objEntry = { body, pivot, mesh };
+    objects.set(id, objEntry);
+    pickables.push(mesh);
+    savedOriginals.set(id, {
+      pivot,
+      localPos: mesh.position.clone(),
+      scale: mesh.scale.clone(),
+      rotZ: mesh.rotation.z
+    });
+
+    const rec = {
+      id,
+      kind,
+      name: displayName,
+      body,
+      objEntry,
+      pivot,
+      mesh,
+      ringMesh,
+      orbitLine,
+      baseOrbit,
+      orbitMult: safeOrbitMult,
+      temp: baseTemp,
+      pop: Math.max(0, Math.round(Number(pop) || 0)),
+      hasRings: Boolean(hasRings)
+    };
+    customBodies.push(rec);
+    return rec;
+  }
+
+  function updateCustomBody(id, patch = {}) {
+    const rec = customBodies.find(b => b.id === id);
+    if (!rec) return null;
+    if (patch.name !== undefined) {
+      const clean = String(patch.name).trim();
+      if (clean) {
+        rec.name = clean;
+        rec.body.name = clean;
+      }
+    }
+    if (patch.size !== undefined) {
+      const s = Math.max(0.35, Math.min(rec.kind === 'star' ? 6.5 : 4.2, Number(patch.size) || rec.body.size));
+      rec.body.size = s;
+      rec.body.diameter = `${Math.round(s * 12000).toLocaleString('tr-TR')} km`;
+      rec.mesh.scale.setScalar(s);
+      const orig = savedOriginals.get(id);
+      if (orig) orig.scale.setScalar(s);
+    }
+    if (patch.distance !== undefined) {
+      const d = Math.max(10, Math.min(105, Number(patch.distance) || rec.body.distance));
+      rec.body.distance = d;
+      rec.body.period = `${Math.round(d * 14)} gün`;
+      if (rec.mesh.parent === rec.pivot) rec.mesh.position.x = d;
+      const orig = savedOriginals.get(id);
+      if (orig) orig.localPos.set(d, 0, 0);
+      const pts = [];
+      for (let i = 0; i <= 160; i++) {
+        const a = (i * Math.PI * 2) / 160;
+        pts.push(new THREE.Vector3(Math.cos(a) * d, 0, Math.sin(a) * d));
+      }
+      rec.orbitLine.geometry.dispose();
+      rec.orbitLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+      rec.baseOrbit = (rec.kind === 'star' ? 0.008 : 0.012) * Math.sqrt(25 / d);
+      rec.body.orbit = rec.baseOrbit * rec.orbitMult;
+    }
+    if (patch.orbitMult !== undefined) {
+      rec.orbitMult = Math.max(0.1, Math.min(4.0, Number(patch.orbitMult) || 1));
+      rec.body.orbit = rec.baseOrbit * rec.orbitMult;
+    }
+    if (patch.hasRings !== undefined && rec.ringMesh) {
+      rec.hasRings = Boolean(patch.hasRings);
+      rec.ringMesh.visible = rec.hasRings;
+      rec.mesh.rotation.z = rec.hasRings ? 0.28 : 0;
+      const orig = savedOriginals.get(id);
+      if (orig) orig.rotZ = rec.mesh.rotation.z;
+    }
+    if (patch.temp !== undefined && Number.isFinite(Number(patch.temp))) {
+      rec.temp = Math.round(Number(patch.temp));
+      rec.body.temp = `${rec.temp}°C`;
+    }
+    if (patch.pop !== undefined && Number.isFinite(Number(patch.pop))) {
+      rec.pop = Math.max(0, Math.round(Number(patch.pop)));
+    }
+    return rec;
+  }
+
+  function removeCustomBody(id) {
+    const idx = customBodies.findIndex(b => b.id === id);
+    if (idx === -1) return false;
+    const b = customBodies[idx];
+    objects.delete(id);
+    savedOriginals.delete(id);
+    const pIdx = pickables.indexOf(b.mesh);
+    if (pIdx !== -1) pickables.splice(pIdx, 1);
+    if (b.mesh.parent && b.mesh.parent !== b.pivot) b.mesh.parent.remove(b.mesh);
+    b.pivot.traverse(obj => {
+      obj.geometry?.dispose();
+      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+      else obj.material?.dispose();
+    });
+    customGroup.remove(b.pivot);
+    customBodies.splice(idx, 1);
+    return true;
   }
 
   function clearCustomBodies() {
-    for (const b of customBodies) {
-      b.pivot.traverse(obj => {
-        obj.geometry?.dispose();
-        if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
-        else obj.material?.dispose();
-      });
-      customGroup.remove(b.pivot);
+    const removedIds = customBodies.map(b => b.id);
+    while (customBodies.length > 0) {
+      removeCustomBody(customBodies[0].id);
     }
-    customBodies.length = 0;
+    return removedIds;
   }
 
   function clearDebrisRings() {
@@ -508,8 +647,16 @@ export function createCosmosExtras({
     boostAurora(level = 1.0) {
       aurora.mat.uniforms.uBoost.value = Math.max(0.5, Math.min(2.6, level));
     },
-    triggerSupernova(onDetonate) {
-      supernova = { phase: 'swell', age: 0, onDetonate };
+    triggerSupernova(onDetonate, onShockwave = null, onVaporize = null) {
+      supernova = {
+        phase: 'swell',
+        age: 0,
+        onDetonate,
+        onShockwave,
+        onVaporize,
+        shockwaveHit: false,
+        vaporized: new Set()
+      };
       snGroup.visible = true;
       pulsarGroup.visible = false;
       pulsarLight.intensity = 0;
@@ -556,7 +703,15 @@ export function createCosmosExtras({
       return true;
     },
     spawnCustomBody,
+    updateCustomBody,
+    removeCustomBody,
     clearCustomBodies,
+    getCustomBodies() {
+      return [...customBodies];
+    },
+    getBinaryStarCount() {
+      return customBodies.filter(b => b.kind === 'star').length;
+    },
     getCustomBodyCount() {
       return customBodies.length;
     },
@@ -594,18 +749,14 @@ export function createCosmosExtras({
       aurora.mesh.visible = earth.mesh.visible;
       aurora.mat.uniforms.uTime.value += dt;
 
-      // Rotate planetary collision debris rings
+      // Rotate planetary collision debris rings (custom bodies orbit via main.js objects loop so they obey black hole capture!)
       if (!paused) {
         for (const r of debrisRings) {
           r.ringGroup.rotation.y += dt * 0.38 * Math.max(0.25, speed);
         }
-        for (const b of customBodies) {
-          b.pivot.rotation.y += b.orbitSpeed * dt * 60 * 0.25 * speed;
-          b.mesh.rotation.y += b.spin * dt * 60 * speed;
-        }
       }
 
-      // Supernova lifecycle -> Red Giant destabilize -> Detonation -> Spinning Pulsar
+      // Supernova lifecycle -> Red Giant destabilize -> Detonation -> Shockwave vaporization -> Spinning Pulsar
       if (supernova) {
         supernova.age += dt;
         if (supernova.phase === 'swell') {
@@ -631,14 +782,36 @@ export function createCosmosExtras({
           }
         } else {
           const p = Math.min(1, supernova.age / 14.0);
+          const snRadius = 4 + supernova.age * 18.0;
           snShellMat.uniforms.uTime.value = supernova.age;
           snShellMat.uniforms.uProgress.value = p;
           snShell.scale.setScalar(4 + supernova.age * 11.5);
-          snWave.scale.setScalar(4 + supernova.age * 18.0);
+          snWave.scale.setScalar(snRadius);
           snWave.material.opacity = Math.max(0, (1 - p * 1.4) * 0.72);
           // Rapidly spinning Pulsar lighthouse beams!
           pulsarGroup.rotation.y += dt * 7.5;
           pulsarLight.intensity = 1550 + Math.sin(supernova.age * 15.0) * 320;
+
+          // Shockwave physically vaporizes inner rocky planets (Mercury, Venus, close custom planets)
+          for (const [id, entry] of objects.entries()) {
+            if (id === 'sun' || entry.body.isStar) continue;
+            if (entry.body.distance > 0 && entry.body.distance <= 19.5 && snRadius >= entry.body.distance) {
+              if (!supernova.vaporized.has(id)) {
+                supernova.vaporized.add(id);
+                entry.mesh.visible = false;
+                addShake(0.35, 0.55);
+                pulseBloom(1.4);
+                supernova.onVaporize?.(id, entry.body.name);
+              }
+            }
+          }
+          // When shockwave reaches Earth's orbit (22.8), ignite molten crust scorch!
+          if (!supernova.shockwaveHit && snRadius >= 22.8) {
+            supernova.shockwaveHit = true;
+            addShake(0.65, 1.1);
+            pulseBloom(1.8);
+            supernova.onShockwave?.();
+          }
         }
       }
 

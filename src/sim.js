@@ -99,23 +99,88 @@ export function createSimulator({
   const { defenseSys, terraformSys, dysonSys, wormholeSys, galaxySys, surfaceSys } = megaSystems;
   const earth = objects.get('earth');
   const sun = objects.get('sun');
+  const planetProfiles = { ...PLANET_PROFILES };
   let targetId = 'earth';
   let impactorId = 'mars';
   let creatorKind = 'planet';
+  let creatorName = '';
   let creatorSize = 1.4;
   let creatorDist = 36;
+  let creatorOrbitMult = 1.0;
+  let creatorTemp = 15;
+  let creatorPopBillions = 1.0;
   let creatorColor = '#58c9ff';
   let creatorRings = true;
+  let editingCustomId = null;
   let defenseCount = 4;
   let terraformPct = 100;
   let dysonPct = 65;
   let wormholeDest = 'saturn';
   let surfaceHost = 'earth';
-  const currentTarget = () =>
-    (isAllowedKey(PLANET_PROFILES, targetId) && objects.get(targetId)) || earth;
-  const targetProfile = () =>
-    isAllowedKey(PLANET_PROFILES, targetId) ? PLANET_PROFILES[targetId] : PLANET_PROFILES.earth;
+
+  const getProfile = id => (isAllowedKey(planetProfiles, id) ? planetProfiles[id] : null);
+  const getAllBodyIds = () => Object.keys(planetProfiles).filter(id => objects.has(id));
+  const currentTarget = () => (getProfile(targetId) && objects.get(targetId)) || earth;
+  const targetProfile = () => getProfile(targetId) || planetProfiles.earth;
   const effects = createImpactEffects(scene, earth, camera, { objects, moon, addShake, pulseBloom });
+
+  function registerCustomProfile(rec) {
+    if (!rec) return;
+    const isStar = rec.kind === 'star';
+    planetProfiles[rec.id] = {
+      name: rec.name,
+      temp: rec.temp,
+      atmo: isStar ? 0 : 85,
+      vel: Number((14 + Math.sqrt(35 / Math.max(10, rec.body.distance)) * 16).toFixed(1)),
+      pop: isStar ? 0 : rec.pop,
+      isCustom: true,
+      isStar
+    };
+    effects.registerBody(rec.id, rec.objEntry);
+  }
+
+  function syncCustomProfile(rec) {
+    if (!rec || !isAllowedKey(planetProfiles, rec.id)) return;
+    const isStar = rec.kind === 'star';
+    const prof = planetProfiles[rec.id];
+    prof.name = rec.name;
+    prof.temp = rec.temp;
+    prof.pop = isStar ? 0 : rec.pop;
+    prof.vel = Number((14 + Math.sqrt(35 / Math.max(10, rec.body.distance)) * 16 * rec.orbitMult).toFixed(1));
+    effects.updateBodySnapshot(rec.id, rec.objEntry);
+    if (targetId === rec.id) {
+      telTemp = prof.temp;
+      telVel = prof.vel;
+      initial = prof.pop;
+      survivors = Math.min(survivors, initial);
+      if (!experimentRun) survivors = initial;
+      stats();
+    }
+  }
+
+  function unregisterCustomProfile(id) {
+    if (isAllowedKey(planetProfiles, id) && planetProfiles[id].isCustom) {
+      delete planetProfiles[id];
+    }
+    effects.unregisterBody(id);
+    if (editingCustomId === id) editingCustomId = null;
+    if (impactorId === id) impactorId = 'mars';
+    if (wormholeDest === id) wormholeDest = 'saturn';
+    if (surfaceHost === id) surfaceHost = 'earth';
+    if (targetId === id) {
+      targetId = 'earth';
+      effects.setTarget(earth);
+      defenseSys?.setTarget(earth);
+      const ep = planetProfiles.earth;
+      initial = Math.round(readPopulationBillions(8.5) * 1e9);
+      survivors = initial;
+      telTemp = ep.temp;
+      telAtmo = ep.atmo;
+      telVel = ep.vel;
+      select('earth');
+      stats();
+    }
+  }
   const original = {
     ambient: ambient.intensity,
     light: light.intensity,
@@ -321,7 +386,9 @@ export function createSimulator({
     for (const item of items) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      if (item.className) btn.className = item.className;
+      const cls = [item.className || '', item.active ? 'active' : ''].filter(Boolean).join(' ');
+      if (cls) btn.className = cls;
+      if (item.active !== undefined) btn.setAttribute('aria-pressed', String(Boolean(item.active)));
       if (item.dataset) {
         for (const [k, v] of Object.entries(item.dataset)) {
           btn.dataset[k] = String(v);
@@ -343,7 +410,7 @@ export function createSimulator({
 
   function switchTarget(nextId) {
     if (effects.busy) return false;
-    if (!isAllowedKey(PLANET_PROFILES, nextId) || !objects.has(nextId)) return false;
+    if (!getProfile(nextId) || !objects.has(nextId)) return false;
     runEpoch++;
     lastRunAt = 0;
     experimentRun = false;
@@ -353,13 +420,17 @@ export function createSimulator({
     const entry = currentTarget();
     const prof = targetProfile();
     effects.setTarget(entry);
+    defenseSys?.setTarget(entry);
     exposure = readExposureInput();
     shelter = readShelterInput();
     initial = targetId === 'earth' ? Math.round(readPopulationBillions(8.5) * 1e9) : prof.pop;
     survivors = initial;
-    telTemp = prof.temp;
+    const starHeat = !prof.isStar && targetId !== 'sun' ? (cosmosFx?.getBinaryStarCount?.() || 0) * 95 : 0;
+    const dysonCool = !prof.isStar && targetId !== 'sun' ? Math.round(((dysonSys?.getProgress?.() || 0) / 100) * 160) : 0;
+    telTemp = Math.max(-240, prof.temp + starHeat - dysonCool);
     telAtmo = prof.atmo;
     telVel = prof.vel;
+    if (starHeat > 0 || dysonCool > 0) experimentRun = true;
     bhTelPhase = 0;
     title = `${prof.name} hedef alındı`;
     description =
@@ -419,12 +490,13 @@ export function createSimulator({
     targetSelect.id = 'target-planet';
     targetSelect.className = 'sim-select';
     targetSelect.disabled = effects.busy;
-    for (const id of PLANET_IDS) {
-      const p = PLANET_PROFILES[id];
+    for (const id of getAllBodyIds()) {
+      const p = planetProfiles[id];
       const opt = document.createElement('option');
       opt.value = id;
       opt.selected = id === targetId;
-      opt.textContent = p.pop > 0 ? p.name : `${p.name} (Koloni / Yüzey)`;
+      const tag = p.isCustom ? (p.isStar ? ' · ⭐ Özel Yıldız' : ' · 🪐 Özel') : '';
+      opt.textContent = p.pop > 0 ? `${p.name}${tag}` : `${p.name}${tag || ' (Koloni / Yüzey)'}`;
       targetSelect.append(opt);
     }
     targetSelect.onchange = e => {
@@ -694,35 +766,35 @@ export function createSimulator({
       impLbl.htmlFor = 'impactor-planet';
       impLbl.textContent = 'Fırlatılacak Gezegen';
       const impOut = document.createElement('output');
-      impOut.textContent = isAllowedKey(PLANET_PROFILES, impactorId) ? PLANET_PROFILES[impactorId].name : 'Mars';
+      impOut.textContent = getProfile(impactorId)?.name || 'Mars';
       impHead.append(impLbl, impOut);
 
       const impSel = document.createElement('select');
       impSel.id = 'impactor-planet';
       impSel.className = 'sim-select';
-      for (const id of PLANET_IDS) {
-        if (id === 'sun' || id === targetId) continue;
+      for (const id of getAllBodyIds()) {
+        if (id === 'sun' || id === targetId || planetProfiles[id]?.isStar) continue;
         const opt = document.createElement('option');
         opt.value = id;
         opt.selected = id === impactorId;
-        opt.textContent = PLANET_PROFILES[id].name;
+        opt.textContent = planetProfiles[id].name;
         impSel.append(opt);
       }
       if (!impSel.value && impSel.options.length) {
         impactorId = impSel.options[0].value;
-        impOut.textContent = PLANET_PROFILES[impactorId].name;
+        impOut.textContent = getProfile(impactorId)?.name || 'Mars';
       }
       impSel.onchange = e => {
-        if (isAllowedKey(PLANET_PROFILES, e.target.value) && e.target.value !== targetId) {
+        if (getProfile(e.target.value) && e.target.value !== targetId) {
           impactorId = e.target.value;
-          impOut.textContent = PLANET_PROFILES[impactorId].name;
+          impOut.textContent = planetProfiles[impactorId].name;
         }
       };
       impRow.append(impHead, impSel);
       nodes.push(
         impRow,
         createTip(
-          `${PLANET_PROFILES[impactorId]?.name || 'Mars'} gezegenini ${pName} üzerine fırlatır; çarpışma anında küçük gök cismi parçalanıp etrafında dönen erimiş bir enkaz halkası oluşturur.`
+          `${getProfile(impactorId)?.name || 'Mars'} gezegenini ${pName} üzerine fırlatır; çarpışma anında küçük gök cismi parçalanıp etrafında dönen erimiş bir enkaz halkası oluşturur.`
         )
       );
     }
@@ -730,17 +802,38 @@ export function createSimulator({
     if (caseId === 'supernova') {
       nodes.push(
         createTip(
-          'Güneş önce Kırmızı Dev aşamasında şişip kararsızlaşır, ardından Süpernova şok dalgası ve renkli nebula bulutuyla patlar; merkezde hızla dönen ışın saçan bir Pulsar (Nötron Yıldızı) kalır.'
+          'Güneş önce Kırmızı Dev aşamasında şişip kararsızlaşır, ardından Süpernova şok dalgası iç gezegenleri buharlaştırır, Dünya kabuğunu kavurur ve merkezde hızla dönen ışınlı bir Pulsar kalır.'
         )
       );
     }
 
     if (caseId === 'creator') {
+      const nameRow = document.createElement('div');
+      nameRow.className = 'sim-row';
+      const nameHead = document.createElement('div');
+      nameHead.className = 'sim-row-head';
+      const nameLbl = document.createElement('label');
+      nameLbl.htmlFor = 'creator-name';
+      nameLbl.textContent = creatorKind === 'star' ? 'Yıldız adı' : 'Gezegen adı';
+      nameHead.append(nameLbl);
+      const nameInput = document.createElement('input');
+      nameInput.id = 'creator-name';
+      nameInput.type = 'text';
+      nameInput.maxLength = 24;
+      nameInput.className = 'sim-text-input';
+      nameInput.placeholder = creatorKind === 'star' ? 'Örn: Sirius B' : 'Örn: Kepler-22b';
+      nameInput.value = creatorName;
+      nameInput.oninput = e => {
+        creatorName = e.target.value;
+      };
+      nameRow.append(nameHead, nameInput);
+
       nodes.push(
         createPresetGroup([
           { label: '🪐 Yeni Gezegen', active: creatorKind === 'planet', onClick: () => { creatorKind = 'planet'; render(); } },
           { label: '⭐ İkinci Yıldız (Çift)', active: creatorKind === 'star', onClick: () => { creatorKind = 'star'; render(); } }
         ]),
+        nameRow,
         createRangeControl({
           label: creatorKind === 'star' ? 'Yıldız boyutu' : 'Gezegen boyutu',
           id: 'creator-size',
@@ -761,6 +854,42 @@ export function createSimulator({
           unit: 'u',
           onChange: v => { creatorDist = Math.round(v); }
         }),
+        createRangeControl({
+          label: 'Yörünge hızı',
+          id: 'creator-orbit-mult',
+          min: 0.2,
+          max: 3.0,
+          step: 0.1,
+          value: creatorOrbitMult,
+          unit: '×',
+          onChange: v => { creatorOrbitMult = v; }
+        })
+      );
+      if (creatorKind === 'planet') {
+        nodes.push(
+          createRangeControl({
+            label: 'Başlangıç sıcaklığı',
+            id: 'creator-temp',
+            min: -200,
+            max: 400,
+            step: 5,
+            value: creatorTemp,
+            unit: '°C',
+            onChange: v => { creatorTemp = Math.round(v); }
+          }),
+          createRangeControl({
+            label: 'Koloni nüfusu',
+            id: 'creator-pop',
+            min: 0,
+            max: 10,
+            step: 0.5,
+            value: creatorPopBillions,
+            unit: 'milyar',
+            onChange: v => { creatorPopBillions = v; }
+          })
+        );
+      }
+      nodes.push(
         createPresetGroup([
           { label: 'Buz Mavisi', active: creatorColor === '#58c9ff', onClick: () => { creatorColor = '#58c9ff'; render(); } },
           { label: 'Kızıl Lav', active: creatorColor === '#ff6b4a', onClick: () => { creatorColor = '#ff6b4a'; render(); } },
@@ -777,19 +906,167 @@ export function createSimulator({
           ])
         );
       }
-      const createdN = cosmosFx?.getCustomBodyCount?.() || 0;
+      const createdList = cosmosFx?.getCustomBodies?.() || [];
       nodes.push(
         createTip(
-          `Kendi yıldız veya gezegenini sisteme ekle (ekli özel cisim: ${createdN}). İstediğin kadar ekleyip Çift Yıldızlı sistem kurabilirsin.`
+          `Oluşturduğun her gezegen/yıldız tam fiziksel üyedir: tıklanabilir, kara delikle yutulur, asteroid/çarpışma/savunma/terraforming uygulanabilir ve aşağıdan canlı düzenlenebilir! (Ekli: ${createdList.length})`
         )
       );
-      if (createdN > 0) {
+      if (createdList.length > 0) {
+        const listWrap = document.createElement('div');
+        listWrap.className = 'custom-body-list';
+        for (const item of createdList) {
+          const card = document.createElement('div');
+          card.className = item.id === targetId ? 'custom-body-card active-target' : 'custom-body-card';
+
+          const head = document.createElement('div');
+          head.className = 'custom-body-head';
+          const titleStrong = document.createElement('strong');
+          titleStrong.textContent = `${item.kind === 'star' ? '⭐' : '🪐'} ${item.name}`;
+          const meta = document.createElement('span');
+          meta.className = 'custom-body-meta';
+          meta.textContent = `${item.body.size.toFixed(1)}× · ${item.body.distance}u · ${item.temp}°C`;
+          head.append(titleStrong, meta);
+
+          const acts = document.createElement('div');
+          acts.className = 'custom-body-actions';
+
+          const focusBtn = document.createElement('button');
+          focusBtn.type = 'button';
+          focusBtn.textContent = item.id === targetId ? '✓ Hedefte' : '🎯 Hedef Al';
+          focusBtn.onclick = () => {
+            switchTarget(item.id);
+          };
+
+          const editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.textContent = editingCustomId === item.id ? '▲ Kapat' : '⚙ Ayarla';
+          editBtn.onclick = () => {
+            editingCustomId = editingCustomId === item.id ? null : item.id;
+            render();
+          };
+
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.textContent = '✕ Sil';
+          delBtn.onclick = () => {
+            if (cosmosFx?.removeCustomBody(item.id)) {
+              unregisterCustomProfile(item.id);
+              notify(`${item.name.toUpperCase()} SİLİNDİ`);
+              render();
+            }
+          };
+
+          acts.append(focusBtn, editBtn, delBtn);
+          card.append(head, acts);
+
+          if (editingCustomId === item.id) {
+            const editor = document.createElement('div');
+            editor.className = 'custom-body-editor';
+            editor.append(
+              createRangeControl({
+                label: 'Boyut',
+                id: `edit-size-${item.id}`,
+                min: 0.4,
+                max: item.kind === 'star' ? 6.5 : 4.2,
+                step: 0.1,
+                value: item.body.size,
+                unit: '×',
+                onChange: v => {
+                  const updated = cosmosFx.updateCustomBody(item.id, { size: v });
+                  syncCustomProfile(updated);
+                }
+              }),
+              createRangeControl({
+                label: 'Yörünge uzaklığı',
+                id: `edit-dist-${item.id}`,
+                min: 10,
+                max: 105,
+                step: 1,
+                value: item.body.distance,
+                unit: 'u',
+                onChange: v => {
+                  const updated = cosmosFx.updateCustomBody(item.id, { distance: v });
+                  syncCustomProfile(updated);
+                }
+              }),
+              createRangeControl({
+                label: 'Yörünge hızı',
+                id: `edit-orbit-${item.id}`,
+                min: 0.1,
+                max: 4.0,
+                step: 0.1,
+                value: item.orbitMult,
+                unit: '×',
+                onChange: v => {
+                  const updated = cosmosFx.updateCustomBody(item.id, { orbitMult: v });
+                  syncCustomProfile(updated);
+                }
+              })
+            );
+            if (item.kind !== 'star') {
+              editor.append(
+                createRangeControl({
+                  label: 'Yüzey sıcaklığı',
+                  id: `edit-temp-${item.id}`,
+                  min: -200,
+                  max: 450,
+                  step: 5,
+                  value: item.temp,
+                  unit: '°C',
+                  onChange: v => {
+                    const updated = cosmosFx.updateCustomBody(item.id, { temp: v });
+                    syncCustomProfile(updated);
+                  }
+                }),
+                createRangeControl({
+                  label: 'Nüfus',
+                  id: `edit-pop-${item.id}`,
+                  min: 0,
+                  max: 10,
+                  step: 0.5,
+                  value: Number((item.pop / 1e9).toFixed(1)),
+                  unit: 'milyar',
+                  onChange: v => {
+                    const updated = cosmosFx.updateCustomBody(item.id, { pop: Math.round(v * 1e9) });
+                    syncCustomProfile(updated);
+                  }
+                }),
+                createPresetGroup([
+                  {
+                    label: '◎ Halka Açık',
+                    active: item.hasRings,
+                    onClick: () => {
+                      const updated = cosmosFx.updateCustomBody(item.id, { hasRings: true });
+                      syncCustomProfile(updated);
+                      render();
+                    }
+                  },
+                  {
+                    label: '○ Halka Kapalı',
+                    active: !item.hasRings,
+                    onClick: () => {
+                      const updated = cosmosFx.updateCustomBody(item.id, { hasRings: false });
+                      syncCustomProfile(updated);
+                      render();
+                    }
+                  }
+                ])
+              );
+            }
+            card.append(editor);
+          }
+          listWrap.append(card);
+        }
+        nodes.push(listWrap);
+
         const clearBtn = document.createElement('button');
         clearBtn.type = 'button';
         clearBtn.className = 'sim-reset';
-        clearBtn.textContent = `✕ Özel cisimleri temizle (${createdN})`;
+        clearBtn.textContent = `✕ Tüm özel cisimleri temizle (${createdList.length})`;
         clearBtn.onclick = () => {
-          cosmosFx?.clearCustomBodies();
+          const removed = cosmosFx?.clearCustomBodies() || [];
+          for (const rid of removed) unregisterCustomProfile(rid);
           notify('ÖZEL GÖK CİSİMLERİ TEMİZLENDİ');
           render();
         };
@@ -810,13 +1087,15 @@ export function createSimulator({
           onChange: v => { defenseCount = Math.round(v); }
         }),
         createTip(
-          `${pName} yörüngesine Uzay İstasyonu ve otomatik lazerli savunma uyduları kurar. Meteor Yağmuru başlattığında uydular meteorları havada vurup parçalar! (Önlenen meteor: ${defenseSys?.getIntercepted?.() || 0})`
+          `${pName} yörüngesine Uzay İstasyonu ve otomatik lazerli savunma uyduları kurar. Meteor Yağmurunu ve 4+ uyduyla 1,5 km'ye kadar asteroitleri havada imha eder! (Önlenen hedef: ${defenseSys?.getIntercepted?.() || 0})`
         )
       );
     }
 
     if (caseId === 'terraform') {
-      const tfTarget = targetId === 'earth' ? 'Dünya (Buzul Çağı)' : targetId === 'mars' || targetId === 'venus' ? `${pName} (Terraforming)` : 'Mars / Venüs / Dünya seçin';
+      const curProf = targetProfile();
+      const canTerraform = targetId === 'earth' || targetId === 'mars' || targetId === 'venus' || (curProf.isCustom && !curProf.isStar);
+      const tfTarget = targetId === 'earth' ? 'Dünya (Buzul Çağı · -78°C)' : canTerraform ? `${pName} (Terraforming)` : 'Mars / Venüs / Özel Gezegen / Dünya seçin';
       nodes.push(
         createRangeControl({
           label: targetId === 'earth' ? 'Buzul Çağı kaplaması' : 'Terraforming ilerlemesi',
@@ -829,11 +1108,11 @@ export function createSimulator({
           onChange: v => { terraformPct = Math.round(v); }
         }),
         createPresetGroup([
-          { label: 'Mars Yaşanabilir', onClick: () => { targetId = 'mars'; terraformPct = 100; select('mars'); render(); } },
-          { label: 'Venüs Yaşanabilir', onClick: () => { targetId = 'venus'; terraformPct = 100; select('venus'); render(); } },
-          { label: 'Kartopu Dünya ❄️', onClick: () => { targetId = 'earth'; terraformPct = 100; select('earth'); render(); } }
+          { label: 'Mars Yaşanabilir', active: targetId === 'mars', onClick: () => { switchTarget('mars'); terraformPct = 100; render(); } },
+          { label: 'Venüs Yaşanabilir', active: targetId === 'venus', onClick: () => { switchTarget('venus'); terraformPct = 100; render(); } },
+          { label: 'Kartopu Dünya ❄️', active: targetId === 'earth', onClick: () => { switchTarget('earth'); terraformPct = 100; render(); } }
         ]),
-        createTip(`Aktif mod: ${tfTarget}. Mars ve Venüs'te okyanuslar, yeşil kıtalar, koloni nüfusu ve gece şehir ışıkları oluşur; Dünya'da Buzul Çağı başlar.`)
+        createTip(`Aktif mod: ${tfTarget}. Mars, Venüs ve özel gezegenlerde okyanus, bitki örtüsü ve koloni oluşur; Dünya'da -78°C Buzul Çağı korunaksız nüfusu dondurur!`)
       );
     }
 
@@ -850,11 +1129,11 @@ export function createSimulator({
           onChange: v => { dysonPct = Math.round(v); }
         }),
         createPresetGroup([
-          { label: '%25 · Sürü', onClick: () => { dysonPct = 25; render(); } },
-          { label: '%65 · Halkalar', onClick: () => { dysonPct = 65; render(); } },
-          { label: '%100 · Tip-II', onClick: () => { dysonPct = 100; render(); } }
+          { label: '%25 · Sürü', active: dysonPct === 25, onClick: () => { dysonPct = 25; render(); } },
+          { label: '%65 · Halkalar', active: dysonPct === 65, onClick: () => { dysonPct = 65; render(); } },
+          { label: '%100 · Tip-II', active: dysonPct === 100, onClick: () => { dysonPct = 100; render(); } }
         ]),
-        createTip('Güneş etrafına altıgen enerji kolektörleri ve enerji halkaları inşa eder. Tamamlandıkça Kardashev Tip-II enerjisi artar ve Güneş ışığı kısılır.')
+        createTip('Güneş etrafına enerji kolektörleri kurar. %100 tamamlandığında Güneş ışığını hapsettiği için Dünya -145°C\'ye kadar soğur ve sığınaksız yaşam donar!')
       );
     }
 
@@ -867,29 +1146,33 @@ export function createSimulator({
       destLbl.htmlFor = 'wormhole-dest';
       destLbl.textContent = 'Çıkış Gezegeni';
       const destOut = document.createElement('output');
-      destOut.textContent = PLANET_PROFILES[wormholeDest]?.name || 'Satürn';
+      destOut.textContent = getProfile(wormholeDest)?.name || 'Satürn';
       destHead.append(destLbl, destOut);
       const destSel = document.createElement('select');
       destSel.id = 'wormhole-dest';
       destSel.className = 'sim-select';
-      for (const id of PLANET_IDS) {
-        if (id === 'sun' || id === targetId) continue;
+      for (const id of getAllBodyIds()) {
+        if (id === 'sun' || id === targetId || planetProfiles[id]?.isStar) continue;
         const opt = document.createElement('option');
         opt.value = id;
         opt.selected = id === wormholeDest;
-        opt.textContent = PLANET_PROFILES[id].name;
+        opt.textContent = planetProfiles[id].name;
         destSel.append(opt);
       }
+      if (!destSel.value && destSel.options.length) {
+        wormholeDest = destSel.options[0].value;
+        destOut.textContent = getProfile(wormholeDest)?.name || 'Satürn';
+      }
       destSel.onchange = e => {
-        if (isAllowedKey(PLANET_PROFILES, e.target.value)) {
+        if (getProfile(e.target.value)) {
           wormholeDest = e.target.value;
-          destOut.textContent = PLANET_PROFILES[wormholeDest].name;
+          destOut.textContent = planetProfiles[wormholeDest].name;
         }
       };
       destRow.append(destHead, destSel);
       nodes.push(
         destRow,
-        createTip(`${pName} ile ${PLANET_PROFILES[wormholeDest]?.name || 'Satürn'} arasında çift yönlü Solucan Deliği açar. Serbest Uçuşta portalın içine uçarak veya aşağıdaki butonla anında ışınlanabilirsin.`)
+        createTip(`${pName} ile ${getProfile(wormholeDest)?.name || 'Satürn'} arasında çift yönlü Solucan Deliği açar. Serbest Uçuşta portalın içine uçarak veya aşağıdaki butonla anında ışınlanabilirsin.`)
       );
       if (wormholeSys?.isActive?.()) {
         const jumpBtn = document.createElement('button');
@@ -916,12 +1199,20 @@ export function createSimulator({
     }
 
     if (caseId === 'surface') {
+      const surfaceItems = [
+        { label: '🌍 Dünya Yüzeyi', active: surfaceHost === 'earth', onClick: () => { surfaceHost = 'earth'; render(); } },
+        { label: '🔴 Mars Yüzeyi', active: surfaceHost === 'mars', onClick: () => { surfaceHost = 'mars'; render(); } }
+      ];
+      if (targetProfile().isCustom && !targetProfile().isStar) {
+        surfaceItems.push({
+          label: `🪐 ${pName}`,
+          active: surfaceHost === targetId,
+          onClick: () => { surfaceHost = targetId; render(); }
+        });
+      }
       nodes.push(
-        createPresetGroup([
-          { label: '🌍 Dünya Yüzeyi', active: surfaceHost === 'earth', onClick: () => { surfaceHost = 'earth'; render(); } },
-          { label: '🔴 Mars Yüzeyi', active: surfaceHost === 'mars', onClick: () => { surfaceHost = 'mars'; render(); } }
-        ]),
-        createTip('Seçtiğin gezegenin yüzeyine inip gökyüzüne bak! Kara delik, Süpernova veya Meteor Yağmuru başlattığında gökyüzünde olanları yerden izleyebilirsin.')
+        createPresetGroup(surfaceItems),
+        createTip('Seçtiğin gezegenin yüzeyine inip gökyüzüne bak! Sürükleyerek 360° gökyüzünü izle; Kara Delik, Süpernova veya Meteor Yağmuru başlattığında yerden seyret.')
       );
       if (surfaceSys?.isActive?.()) {
         const exitS = document.createElement('button');
@@ -1124,37 +1415,49 @@ export function createSimulator({
     habTick = 0;
 
     const prof = targetProfile();
-    const severeAtmo = Math.min(12, Math.max(1, prof.atmo - 3));
-    const lethalMolten = telTemp >= 350 || telAtmo <= 0 || (telAtmo <= 2 && telTemp >= 150) || telTemp <= -190;
-    const severeUninhabitable = telAtmo <= severeAtmo || telTemp >= 95 || telTemp <= -90;
-    if (lethalMolten) {
-      const drop = Math.max(Math.ceil(initial * 0.14), Math.round(survivors * Math.min(1, hdt * 1.45)));
+    const isColdLethal = telTemp <= -120;
+    const isHeatLethal = telTemp >= 350;
+    const isVacLethal = telAtmo <= 2;
+
+    if (isHeatLethal || isColdLethal || isVacLethal) {
+      const drop = Math.max(Math.ceil(initial * 0.14), Math.round(survivors * Math.min(1, hdt * 1.35)));
       survivors = Math.max(0, survivors - drop);
       if (survivors < initial * 0.002) survivors = 0;
       if (survivors === 0) {
-        title = 'Tam Yok Oluş · Yaşanmaz Gezegen';
+        title = isColdLethal ? 'Tam Donma · Yaşam Sona Erdi ❄️' : 'Tam Yok Oluş · Yaşanmaz Gezegen';
         description = `Yüzey sıcaklığı (${Math.round(telTemp)}°C) ve atmosfer (%${Math.round(telAtmo)}) tüm yaşamı bitirdi.`;
         banner(`YOK OLUŞ · ${prof.name} artık yaşanmaz`);
       }
       stats();
-    } else if (severeUninhabitable) {
-      const bunkerCap = Math.round(initial * (shelter / 100) * 0.65);
-      const exposed = Math.max(0, survivors - bunkerCap);
-      if (exposed > 0) {
-        const atmoSpan = severeAtmo + 3;
-        const severity =
-          (telAtmo <= severeAtmo ? (atmoSpan - telAtmo) / atmoSpan : 0) +
-          (telTemp >= 95 ? (telTemp - 85) / 220 : 0) +
-          (telTemp <= -90 ? (-80 - telTemp) / 140 : 0);
-        const rate = Math.min(0.85, Math.max(0.08, severity * 0.42)) * hdt;
-        const loss = Math.max(Math.ceil(exposed * 0.06), Math.round(exposed * rate));
-        survivors = Math.max(bunkerCap, survivors - loss);
-        if (survivors === 0) {
-          title = 'Tam Yok Oluş · Yaşanmaz Gezegen';
-          description = `Atmosfer (%${Math.round(telAtmo)}) ve sıcaklık (${Math.round(telTemp)}°C) yaşam koşullarını yok etti.`;
-        }
-        stats();
+      return;
+    }
+
+    // Realistic human & colony climate survival envelope: -15°C .. +52°C and >= 35% breathable atmosphere
+    const coldStress = telTemp < -15 ? (-15 - telTemp) / 42 : 0; // >= 1.0 at -57°C (Ice Age -78°C = 1.5!)
+    const heatStress = telTemp > 52 ? (telTemp - 52) / 58 : 0;    // >= 1.0 at +110°C
+    const atmoStress = telAtmo < 35 ? (35 - telAtmo) / 23 : 0;   // >= 1.0 at <= 12%
+    const maxStress = Math.max(coldStress, heatStress, atmoStress);
+    if (maxStress <= 0) return;
+
+    const bunkerCap = Math.round(initial * (shelter / 100) * 0.72);
+    const adaptiveFloor = maxStress >= 1 ? 0 : Math.round(initial * (1 - maxStress) * 0.85);
+    const targetFloor = Math.min(initial, Math.max(bunkerCap, adaptiveFloor));
+    const exposed = Math.max(0, survivors - targetFloor);
+    if (exposed > 0) {
+      const rate = Math.min(0.88, Math.max(0.12, maxStress * 0.34)) * hdt;
+      const loss = Math.max(Math.ceil(exposed * 0.065), Math.round(exposed * rate));
+      survivors = Math.max(targetFloor, survivors - loss);
+      if (targetFloor === 0 && survivors < initial * 0.002) survivors = 0;
+      if (survivors === 0) {
+        title = coldStress >= heatStress && coldStress >= atmoStress
+          ? 'Buzul Yok Oluşu · Gezegen Dondu ❄️'
+          : 'Tam Yok Oluş · Yaşanmaz Gezegen';
+        description = `Sıcaklık (${Math.round(telTemp)}°C) ve atmosfer (%${Math.round(telAtmo)}) tüm korunaksız nüfusu yok etti.`;
+        banner(`YOK OLUŞ · ${prof.name} (${Math.round(telTemp)}°C)`);
+      } else if (survivors === targetFloor && bunkerCap > 0 && targetFloor === bunkerCap) {
+        description = `Yüzey yaşanmaz (${Math.round(telTemp)}°C) · Yalnızca yeraltı sığınaklarındaki ${num(survivors)} kişi hayatta.`;
       }
+      stats();
     }
   }
 
@@ -1172,6 +1475,8 @@ export function createSimulator({
       const tgt = currentTarget();
       const prof = targetProfile();
       const epoch = runEpoch;
+      exposure = readExposureInput();
+      shelter = readShelterInput();
       experimentRun = true;
       select(targetId);
       if (innerWidth <= 760) setPanel(false);
@@ -1237,7 +1542,7 @@ export function createSimulator({
         const swallowedList = [];
         effects.spawnBlackHole(safeBhMass, shatter, (bodyId, bodyName) => {
           if (epoch !== runEpoch) return;
-          const label = hasOwnProp(PLANET_PROFILES, bodyId) ? PLANET_PROFILES[bodyId].name : bodyName;
+          const label = getProfile(bodyId)?.name || bodyName;
           swallowedList.push(label);
           if (bodyId === 'sun') {
             light.intensity = 0;
@@ -1249,7 +1554,7 @@ export function createSimulator({
             banner('KARA DELİK · GÜNEŞ YUTULDU · SİSTEM KARANLIĞA GÖMÜLDÜ');
             logEvent('GÜNEŞ YUTULDU', 'Kara delik yıldızı söndürdü');
           } else {
-            if (bodyId === 'earth') survivors = 0;
+            if (bodyId === targetId) survivors = 0;
             banner(`KARA DELİK · ${label.toUpperCase()} YUTULDU (${swallowedList.length} cisim)`);
             logEvent(`${label} Yutuldu`, 'Olay ufkuna çekildi');
           }
@@ -1296,7 +1601,7 @@ export function createSimulator({
         playSfx?.('reset');
         title = n > 0 ? `${prof.name} Savunma Ağı Aktif 🛰` : 'Savunma Ağı Kapatıldı';
         description = n > 0
-          ? `${n} otomatik lazerli savunma uydusu ve Uzay İstasyonu yörüngeye yerleşti. Şimdi Meteor Yağmuru başlatıp test edebilirsin!`
+          ? `${n} otomatik lazerli savunma uydusu ve Uzay İstasyonu yörüngeye yerleşti. Meteor yağmurunu ve küçük/orta asteroitleri havada imha eder!`
           : 'Yörünge savunma uyduları devre dışı bırakıldı.';
         banner(title);
         logEvent('Yörünge Savunması', `${prof.name} · ${n} uydu`);
@@ -1306,24 +1611,31 @@ export function createSimulator({
       }
 
       if (caseId === 'terraform') {
-        const tfId = targetId === 'mars' || targetId === 'venus' || targetId === 'earth' ? targetId : 'mars';
-        targetId = tfId;
+        const curProf = targetProfile();
+        const validTf = targetId === 'mars' || targetId === 'venus' || targetId === 'earth' || (curProf.isCustom && !curProf.isStar);
+        const tfId = validTf ? targetId : 'mars';
+        if (tfId !== targetId) switchTarget(tfId);
+        experimentRun = true;
         select(tfId);
-        const res = terraformSys?.applyTerraform(tfId, terraformPct);
+        const tfProf = getProfile(tfId) || planetProfiles.mars;
+        const res = terraformSys?.applyTerraform(tfId, terraformPct, tfProf);
         if (res) {
           telTemp = res.temp;
           telAtmo = res.atmo;
           if (res.colonyPop !== null) {
             initial = Math.max(initial, res.colonyPop);
             survivors = res.colonyPop;
+          } else {
+            // Ice Age immediately begins freezing unprotected populations
+            habTick = 0.25;
           }
           playSfx?.('reset');
-          title = tfId === 'earth' ? `Buzul Çağı · %${terraformPct} ❄️` : `${PLANET_PROFILES[tfId].name} Terraforming · %${terraformPct} 🌍`;
+          title = tfId === 'earth' ? `Buzul Çağı · %${terraformPct} ❄️` : `${tfProf.name} Terraforming · %${terraformPct} 🌍`;
           description = tfId === 'earth'
-            ? `Buzullar kutuplardan ekvatora yayıldı · Sıcaklık: ${res.temp}°C.`
+            ? `Buzullar kutuplardan ekvatora yayıldı · Sıcaklık: ${res.temp}°C · Sığınaksız nüfus donma tehlikesinde!`
             : `Okyanuslar, yeşil kıtalar ve gece şehir ışıkları oluştu · Sıcaklık: ${res.temp}°C · Koloni: ${num(res.colonyPop)}.`;
           banner(title);
-          logEvent(tfId === 'earth' ? 'Buzul Çağı' : 'Terraforming', `${PLANET_PROFILES[tfId].name} %${terraformPct}`);
+          logEvent(tfId === 'earth' ? 'Buzul Çağı' : 'Terraforming', `${tfProf.name} %${terraformPct} (${res.temp}°C)`);
           stats();
           render();
         }
@@ -1334,11 +1646,16 @@ export function createSimulator({
         select('sun');
         const info = dysonSys?.setProgress(dysonPct);
         if (info) {
+          if (!prof.isStar && targetId !== 'sun') {
+            const starHeat = (cosmosFx?.getBinaryStarCount?.() || 0) * 95;
+            telTemp = Math.max(-240, prof.temp + starHeat - info.earthTempDrop);
+            habTick = 0.25;
+          }
           playSfx?.('grb');
           title = `Dyson Küresi · %${info.progress} (Kardashev ${info.kardashev})`;
-          description = `Güneş etrafında enerji kolektörleri kuruldu · Üretim: ${fmt(info.watts)} Watt.`;
-          banner(`DYSON KÜRESİ · %${info.progress} · TİP-${info.kardashev}`);
-          logEvent('Dyson Küresi', `%${info.progress} · Tip-${info.kardashev}`);
+          description = `Enerji: ${fmt(info.watts)} W · Güneş ışığı kapandıkça ${prof.name} sıcaklığı ${Math.round(telTemp)}°C'ye düştü!`;
+          banner(`DYSON KÜRESİ · %${info.progress} · ${prof.name} ${Math.round(telTemp)}°C`);
+          logEvent('Dyson Küresi', `%${info.progress} · ${Math.round(telTemp)}°C`);
           stats();
           render();
         }
@@ -1346,13 +1663,15 @@ export function createSimulator({
       }
 
       if (caseId === 'wormhole') {
-        const fromId = targetId === 'sun' ? 'earth' : targetId;
+        const fromId = targetId === 'sun' || prof.isStar ? 'earth' : targetId;
         const toId = wormholeDest === fromId ? (fromId === 'saturn' ? 'earth' : 'saturn') : wormholeDest;
         if (wormholeSys?.open(fromId, toId)) {
+          const fromName = getProfile(fromId)?.name || fromId;
+          const toName = getProfile(toId)?.name || toId;
           title = `Solucan Deliği Açıldı 🌀`;
-          description = `${PLANET_PROFILES[fromId].name} ⇄ ${PLANET_PROFILES[toId].name} arasında çift yönlü portal aktif. Serbest Uçuşta içine uç veya "Portaldan Geç"e bas!`;
-          banner(`SOLUCAN DELİĞİ · ${PLANET_PROFILES[fromId].name} ⇄ ${PLANET_PROFILES[toId].name}`);
-          logEvent('Solucan Deliği', `${PLANET_PROFILES[fromId].name} ⇄ ${PLANET_PROFILES[toId].name}`);
+          description = `${fromName} ⇄ ${toName} arasında çift yönlü portal aktif. Serbest Uçuşta içine uç veya "Portaldan Geç"e bas!`;
+          banner(`SOLUCAN DELİĞİ · ${fromName} ⇄ ${toName}`);
+          logEvent('Solucan Deliği', `${fromName} ⇄ ${toName}`);
           stats();
           render();
         }
@@ -1372,10 +1691,11 @@ export function createSimulator({
 
       if (caseId === 'surface') {
         if (surfaceSys?.enter(surfaceHost)) {
-          title = `${surfaceHost === 'mars' ? 'Mars' : 'Dünya'} Yüzey Gözlemi 🔭`;
-          description = 'Yüzeyden gökyüzüne bakıyorsun! Şimdi Kara Delik, Süpernova veya Meteor Yağmuru başlatıp gökyüzünü izleyebilirsin.';
-          banner(`YÜZEY MODU · ${surfaceHost === 'mars' ? 'MARS' : 'DÜNYA'} GÖKYÜZÜ`);
-          logEvent('Yüzey Modu', surfaceHost === 'mars' ? 'Mars' : 'Dünya');
+          const hostName = getProfile(surfaceHost)?.name || 'Dünya';
+          title = `${hostName} Yüzey Gözlemi 🔭`;
+          description = 'Yüzeyden gökyüzüne bakıyorsun! Sürükleyerek 360° çevrene bak, Kara Delik, Süpernova veya Meteor Yağmuru başlat!';
+          banner(`YÜZEY MODU · ${hostName.toUpperCase()} GÖKYÜZÜ`);
+          logEvent('Yüzey Modu', hostName);
           stats();
           render();
         }
@@ -1383,22 +1703,37 @@ export function createSimulator({
       }
 
       if (caseId === 'creator') {
-        const entry = cosmosFx?.spawnCustomBody({
+        const rec = cosmosFx?.spawnCustomBody({
           kind: creatorKind,
-          name: creatorKind === 'star' ? 'İkinci Yıldız' : 'Özel Gezegen',
+          name: creatorName,
           size: creatorSize,
           distance: creatorDist,
+          orbitMult: creatorOrbitMult,
+          temp: creatorKind === 'star' ? 6200 : creatorTemp,
+          pop: creatorKind === 'star' ? 0 : Math.round(creatorPopBillions * 1e9),
           color: creatorColor,
           hasRings: creatorRings,
           hasAtmo: true
         });
-        if (entry) {
+        if (rec) {
+          registerCustomProfile(rec);
+          editingCustomId = rec.id;
+          creatorName = '';
           playSfx?.('reset');
-          const label = creatorKind === 'star' ? 'Çift Yıldız Eklendi ⭐' : 'Yeni Gezegen Yörüngede 🪐';
+          if (creatorKind === 'star' && !prof.isStar && targetId !== 'sun') {
+            telTemp = Math.min(4800, telTemp + 95);
+            habTick = 0.25;
+            if (telTemp > 80) {
+              effects.setEnvironmentalHeat(Math.min(0.85, (telTemp - 65) / 380));
+            }
+          }
+          const label = creatorKind === 'star' ? `${rec.name} (Çift Yıldız) Eklendi ⭐` : `${rec.name} Yörüngede 🪐`;
           title = label;
-          description = `Uzaklık: ${creatorDist} u · Boyut: ${creatorSize.toFixed(1)}× · Sistemdeki özel cisim: ${cosmosFx.getCustomBodyCount()}.`;
+          description = creatorKind === 'star'
+            ? `İkinci yıldız radyasyonu ${prof.name} sıcaklığını ${Math.round(telTemp)}°C'ye yükseltti! Aşağıdan düzenleyebilir veya Kara Delikle yutabilirsin.`
+            : `${rec.name} (${creatorDist}u · ${creatorTemp}°C) sisteme katıldı. Aşağıdan "Hedef Al"a basıp üstünde deney yapabilirsin!`;
           banner(label);
-          logEvent('Sistem Kurucu', `${creatorKind === 'star' ? 'Yıldız' : 'Gezegen'} (${creatorDist} u)`);
+          logEvent('Sistem Kurucu', `${rec.name} (${creatorDist} u)`);
           stats();
           render();
         }
@@ -1409,21 +1744,36 @@ export function createSimulator({
         sunRunning = false;
         select('sun');
         title = 'Güneş Kararsızlaşıyor…';
-        description = 'Çekirdek çöküşü başladı! Kırmızı Dev şişmesinin ardından Süpernova patlayacak.';
+        description = 'Çekirdek çöküşü başladı! Kırmızı Dev şişmesinin ardından Süpernova şok dalgası tüm sistemi vuracak.';
         banner('SÜPERNOVA · ÇEKİRDEK ÇÖKÜŞÜ BAŞLADI');
         stats();
-        cosmosFx?.triggerSupernova(() => {
-          if (epoch !== runEpoch) return;
-          telTemp = 4800;
-          telAtmo = 0;
-          survivors = 0;
-          title = 'Süpernova Patladı · Pulsar Doğdu 🌟';
-          description = 'Güneş parçalandı; genişleyen renkli nebula dalgasının merkezinde hızla dönen ışınlı bir Pulsar (Nötron Yıldızı) kaldı.';
-          banner('SÜPERNOVA · MERKEZDE DÖNEN PULSAR OLUŞTU');
-          logEvent('Süpernova', 'Güneş → Pulsar (Nötron Yıldızı)');
-          stats();
-          render();
-        });
+        cosmosFx?.triggerSupernova(
+          () => {
+            if (epoch !== runEpoch) return;
+            title = 'Süpernova Patladı · Şok Dalgası Yayılıyor 🌟';
+            description = 'Güneş parçalandı ve merkezde hızla dönen Pulsar doğdu! Genişleyen şok dalgası iç gezegenlere ulaşıyor…';
+            banner('SÜPERNOVA · PULSAR DOĞDU · ŞOK DALGASI GELİYOR');
+            logEvent('Süpernova', 'Güneş → Pulsar (Nötron Yıldızı)');
+            stats();
+            render();
+          },
+          () => {
+            if (epoch !== runEpoch) return;
+            telTemp = 4800;
+            telAtmo = 0;
+            survivors = 0;
+            effects.setEnvironmentalHeat(0.95);
+            title = 'Süpernova Şoku Gezegeni Kavurdu 🔥';
+            description = 'Şok dalgası Dünya yörüngesine ulaştı; kabuk eridi, atmosfer soyuldu ve yaşam tamamen sona erdi.';
+            banner('SÜPERNOVA ŞOKU · KABUK ERİDİ · TAM YOK OLUŞ');
+            stats();
+            render();
+          },
+          (_vapId, vapName) => {
+            if (epoch !== runEpoch) return;
+            logEvent(`${vapName} Buharlaştı`, 'Süpernova şok dalgası');
+          }
+        );
         render();
         return;
       }
@@ -1431,7 +1781,7 @@ export function createSimulator({
       if (caseId === 'collision') {
         if (!cosmosFx || cosmosFx.isCollisionBusy()) return;
         const srcId = impactorId === targetId ? (targetId === 'mars' ? 'venus' : 'mars') : impactorId;
-        const srcName = PLANET_PROFILES[srcId]?.name || srcId;
+        const srcName = getProfile(srcId)?.name || srcId;
         title = `${srcName} → ${prof.name} Çarpışması`;
         description = `${srcName} yörüngesinden kopup ${prof.name} üzerine doğru hızlanıyor!`;
         banner(`GEZEGEN ÇARPIŞMASI · ${srcName.toUpperCase()} → ${prof.name.toUpperCase()}`);
@@ -1509,7 +1859,7 @@ export function createSimulator({
               if (telTemp >= 420 || (telAtmo <= 0 && telTemp >= 180)) survivors = 0;
             }
 
-            title = survivors === 0 && initial > 0 ? 'Tam Yok Oluş · Yaşanmaz Gezegen' : `Meteor Yağmuru · ${struck}/${total}`;
+            title = survivors === 0 && initial > 0 ? 'Tam Yok Oluş · Yaşanmaz Gezegen' : `Meteor Yağmuru · ${struck}/${total} isabet`;
             description =
               survivors === 0 && initial > 0
                 ? `Yüzey ${Math.round(telTemp)}°C'ye ulaştı ve atmosfer (%${Math.round(telAtmo)}) çöktü — yaşam tamamen sona erdi.`
@@ -1517,20 +1867,36 @@ export function createSimulator({
             banner(`METEOR YAĞMURU · ${struck}/${total} çarpma`);
             stats();
           },
-          () => {
+          summary => {
             if (epoch !== runEpoch) return;
+            const struck = summary?.struck ?? count;
+            const intercepted = summary?.intercepted ?? 0;
+            const total = summary?.total ?? count;
             if (survivors > 0 && (telTemp >= 380 || telAtmo <= 2)) survivors = 0;
-            title = survivors === 0 && initial > 0 ? 'Tam Yok Oluş · Yaşanmaz Gezegen' : 'Meteor Yağmuru Tamamlandı';
-            description =
-              survivors === 0 && initial > 0
-                ? `${count} meteor sonrası yüzey (${Math.round(telTemp)}°C) ve atmosfer (%${Math.round(telAtmo)}) yaşamı imkânsız kıldı.`
-                : `${count} meteor (%${intenPct} yoğunluk) ${prof.name} yüzeyine çarptı. Aktif krater: ${effects.getCraterCount()}.`;
-            banner(`METEOR YAĞMURU · ${count} çarpma tamamlandı`);
-            logEvent(`Meteor (${prof.name})`, `${count} meteor · %${intenPct}`);
+            if (struck === 0 && intercepted > 0) {
+              title = 'Savunma Ağı Tüm Meteorları İmha Etti 🛰';
+              description = `${intercepted}/${total} meteor yörünge savunma lazerleriyle havada parçalandı; yüzeye tek bir taş düşmedi!`;
+              banner(`SAVUNMA BAŞARILI · ${intercepted}/${total} METEOR İMHA EDİLDİ`);
+            } else if (survivors === 0 && initial > 0) {
+              title = 'Tam Yok Oluş · Yaşanmaz Gezegen';
+              description = `${struck} isabet (${intercepted} önlendi) sonrası yüzey (${Math.round(telTemp)}°C) ve atmosfer (%${Math.round(telAtmo)}) yaşamı imkânsız kıldı.`;
+              banner(`METEOR YAĞMURU · ${struck} isabet · ${intercepted} önlendi`);
+            } else {
+              title = 'Meteor Yağmuru Tamamlandı';
+              description = intercepted > 0
+                ? `${struck} meteor çarptı, ${intercepted} meteor savunma lazerleriyle havada imha edildi. Aktif krater: ${effects.getCraterCount()}.`
+                : `${struck} meteor (%${intenPct} yoğunluk) ${prof.name} yüzeyine çarptı. Aktif krater: ${effects.getCraterCount()}.`;
+              banner(intercepted > 0 ? `METEOR · ${struck} isabet · ${intercepted} lazerle imha` : `METEOR YAĞMURU · ${struck} çarpma tamamlandı`);
+            }
+            logEvent(`Meteor (${prof.name})`, `${struck} isabet · ${intercepted} önlendi`);
             stats();
             render();
           },
-          inten
+          inten,
+          (intercepted, _struck, total) => {
+            if (epoch !== runEpoch) return;
+            banner(`SAVUNMA LAZERİ · ${intercepted}/${total} METEOR HAVADA İMHA EDİLDİ 🛰`);
+          }
         );
         render();
         return;
@@ -1580,7 +1946,19 @@ export function createSimulator({
           logEvent(`${kind.toUpperCase()} (${prof.name})`, `${fmt(e.megatons)} Mt`);
           render();
         },
-        { ftl, beta: safeBeta }
+        {
+          ftl,
+          beta: safeBeta,
+          onIntercept: () => {
+            if (epoch !== runEpoch) return;
+            title = 'Asteroit Yörüngede İmha Edildi 🛰';
+            description = `Yörünge savunma ağı ${fmt(diameter)} m çapındaki asteroidi çarpmadan önce lazerlerle parçaladı! Can kaybı: 0.`;
+            banner(`SAVUNMA BAŞARILI · ${fmt(diameter)} m ASTEROİT İMHA EDİLDİ`);
+            logEvent(`Savunma (${prof.name})`, `${fmt(diameter)} m asteroit önlendi`);
+            stats();
+            render();
+          }
+        }
       );
       render();
     } finally {
@@ -1635,12 +2013,18 @@ export function createSimulator({
     popInput.onchange = e => {
       const safePop = clampFinite(e.target.value, 0, 20, 8.5);
       e.target.value = String(safePop);
+      if (targetId === 'earth' && !experimentRun) {
+        initial = Math.round(safePop * 1e9);
+        survivors = initial;
+        stats();
+      }
     };
   }
   const shelterInput = $('#shelter');
   if (shelterInput) {
     shelterInput.oninput = e => {
       const safeShelter = Math.round(clampFinite(e.target.value, 0, 100, 0));
+      shelter = safeShelter;
       if ($('#shelter-value')) $('#shelter-value').textContent = '%' + safeShelter;
     };
   }
